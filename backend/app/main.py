@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Confluence Chatbot API",
     description="AI-powered chatbot with Confluence integration",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan
 )
 
@@ -44,6 +44,11 @@ uploads_dir = Path("/app/uploads")
 uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
+# Mount cache directory for image caching
+cache_dir = Path("/app/cache")
+cache_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/cache", StaticFiles(directory=str(cache_dir)), name="cache")
+
 # Include routers
 app.include_router(auth.router)
 app.include_router(chat.router)
@@ -53,7 +58,7 @@ app.include_router(admin.router)
 
 @app.get("/")
 async def root():
-    return {"message": "Confluence Chatbot API", "version": "2.1.0"}
+    return {"message": "Confluence Chatbot API", "version": "2.2.0"}
 
 @app.get("/health")
 async def health_check():

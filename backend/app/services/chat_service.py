@@ -305,11 +305,42 @@ class ChatService:
                     on_tool_result(tool_name, result)
 
                 # Add tool result to history
-                message_history.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": json.dumps(result, ensure_ascii=False)
-                })
+                # Handle multimodal results (images)
+                if result.get("_multimodal") and result.get("images"):
+                    # Build multimodal content for GPT Vision
+                    content_parts = [
+                        {"type": "text", "text": f"以下是页面「{result.get('title', '')}」中的 {result.get('image_count', 0)} 张图片，请仔细观察并描述每张图片的内容："}
+                    ]
+                    for img in result["images"]:
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": img["data_url"],
+                                "detail": "high"
+                            }
+                        })
+                    message_history.append({
+                        "role": "user",
+                        "content": content_parts
+                    })
+                    # Also add a tool response to satisfy the API
+                    message_history.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": json.dumps({
+                            "success": True,
+                            "message": result.get("message", "图片已加载"),
+                            "image_count": result.get("image_count", 0),
+                            "filenames": [img["filename"] for img in result["images"]]
+                        }, ensure_ascii=False)
+                    })
+                else:
+                    # Regular text result
+                    message_history.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": json.dumps(result, ensure_ascii=False)
+                    })
 
         # Record token usage if user_id provided
         if user_id and (total_prompt_tokens > 0 or total_completion_tokens > 0):

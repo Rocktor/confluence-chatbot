@@ -241,6 +241,29 @@ CONFLUENCE_TOOLS = [
             }
         }
     },
+    # ============ 图片解读工具 ============
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_confluence_images",
+            "description": "解读 Confluence 页面中的图片/图表/截图内容。当用户想要了解页面中图片的含义、或者想让 AI 看图片时使用此工具。需要先调用 read_confluence_page 获取页面信息。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id": {
+                        "type": "string",
+                        "description": "页面 ID（从 read_confluence_page 返回结果中获取）"
+                    },
+                    "image_filenames": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "可选，指定要解读的图片文件名列表。不指定则解读所有图片（最多5张）"
+                    }
+                },
+                "required": ["page_id"]
+            }
+        }
+    },
     # ============ 导航工具 ============
     {
         "type": "function",
@@ -292,6 +315,12 @@ SYSTEM_PROMPT = """你是一个智能文档助手，可以帮助用户管理 Con
 - search_confluence: 搜索页面
 - upload_attachment_to_confluence: 上传附件到页面
 
+### 图片解读 🖼️
+- analyze_confluence_images: 解读页面中的图片/图表/截图
+  - 读取页面后，如果页面包含图片，可以询问用户是否需要解读
+  - 用户要求"看看图片"、"解读图表"时使用此工具
+  - 最多同时解读 5 张图片
+
 ### 表格操作 ⭐
 - list_confluence_tables: 列出页面中的所有表格信息
 - insert_table_column: 在表格中插入新列
@@ -315,6 +344,12 @@ SYSTEM_PROMPT = """你是一个智能文档助手，可以帮助用户管理 Con
 ### 仅在必要时使用 update_confluence_page
 - 用户明确要求重写整个页面
 - 原有内容不需要保留
+
+## 图片解读策略
+
+1. 读取页面后，如果返回结果包含 `images` 数组，可以告诉用户"页面包含 X 张图片，需要我帮您解读吗？"
+2. 用户确认后，调用 analyze_confluence_images 解读图片
+3. 解读完成后，结合图片内容和文本内容，给出完整的分析
 
 ## 表格操作策略
 
