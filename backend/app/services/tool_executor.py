@@ -34,33 +34,73 @@ class ToolExecutor:
     def _extract_images(self, html_content: str, page_id: str) -> List[Dict[str, str]]:
         """Extract images from Confluence HTML content"""
         images = []
+        seen_filenames = set()
 
-        # Extract attachment images: <ri:attachment ri:filename="xxx"/>
-        attachment_pattern = r'<ri:attachment\s+ri:filename="([^"]+)"'
+        # Pattern 1: <ri:attachment ri:filename="xxx"/>
+        attachment_pattern = r'<ri:attachment[^>]*ri:filename="([^"]+)"'
         for match in re.finditer(attachment_pattern, html_content):
             filename = match.group(1)
-            images.append({
-                "filename": filename,
-                "type": "attachment"
-            })
-
-        # Extract external images: <ri:url ri:value="xxx"/>
-        url_pattern = r'<ri:url\s+ri:value="([^"]+)"'
-        for match in re.finditer(url_pattern, html_content):
-            url = match.group(1)
-            # Skip if it looks like an attachment filename (no protocol)
-            if not url.startswith(('http://', 'https://')):
+            if filename not in seen_filenames:
+                seen_filenames.add(filename)
                 images.append({
-                    "filename": url,
+                    "filename": filename,
                     "type": "attachment"
                 })
-            else:
+
+        # Pattern 2: ri:filename="xxx" (attribute in different order)
+        filename_pattern = r'ri:filename="([^"]+)"'
+        for match in re.finditer(filename_pattern, html_content):
+            filename = match.group(1)
+            if filename not in seen_filenames and self._is_image_file(filename):
+                seen_filenames.add(filename)
                 images.append({
-                    "filename": url,
-                    "type": "external"
+                    "filename": filename,
+                    "type": "attachment"
                 })
 
+        # Pattern 3: <ri:url ri:value="xxx"/>
+        url_pattern = r'<ri:url[^>]*ri:value="([^"]+)"'
+        for match in re.finditer(url_pattern, html_content):
+            url = match.group(1)
+            if url not in seen_filenames:
+                seen_filenames.add(url)
+                if not url.startswith(('http://', 'https://')):
+                    images.append({
+                        "filename": url,
+                        "type": "attachment"
+                    })
+                elif self._is_image_url(url):
+                    images.append({
+                        "filename": url,
+                        "type": "external"
+                    })
+
+        # Pattern 4: <ac:image> tags with embedded content
+        ac_image_pattern = r'<ac:image[^>]*>.*?</ac:image>'
+        for match in re.finditer(ac_image_pattern, html_content, re.DOTALL):
+            image_tag = match.group(0)
+            # Extract filename from within the ac:image tag
+            inner_filename = re.search(r'ri:filename="([^"]+)"', image_tag)
+            if inner_filename:
+                filename = inner_filename.group(1)
+                if filename not in seen_filenames:
+                    seen_filenames.add(filename)
+                    images.append({
+                        "filename": filename,
+                        "type": "attachment"
+                    })
+
+        logger.info(f"Extracted {len(images)} images from page {page_id}: {[img['filename'] for img in images]}")
         return images
+
+    def _is_image_file(self, filename: str) -> bool:
+        """Check if filename looks like an image"""
+        ext = filename.lower().split('.')[-1] if '.' in filename else ''
+        return ext in ('png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp')
+
+    def _is_image_url(self, url: str) -> bool:
+        """Check if URL points to an image"""
+        return self._is_image_file(url.split('?')[0])
 
     def _fix_image_references(self, html_content: str, attachment_filenames: List[str]) -> str:
         """Convert ri:url to ri:attachment for known attachments"""
