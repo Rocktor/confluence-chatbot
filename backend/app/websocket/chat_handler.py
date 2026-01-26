@@ -72,7 +72,15 @@ class ChatWebSocketHandler:
 
                 conversation_id = message_data.get("conversation_id")
                 content = message_data.get("content")
-                image_url = message_data.get("image_url")
+                # Support both single image_url and array image_urls
+                image_urls = message_data.get("image_urls", [])
+                if not image_urls:
+                    single_url = message_data.get("image_url")
+                    if single_url:
+                        image_urls = [single_url]
+
+                # Get file_urls for document parsing
+                file_urls = message_data.get("file_urls", [])
 
                 # Create conversation if not exists
                 if not conversation_id:
@@ -98,7 +106,7 @@ class ChatWebSocketHandler:
                 await websocket.send_json({"type": "stream_start"})
 
                 async for chunk in chat_service.chat_stream_with_tools(
-                    conversation_id, content, user.id, image_url
+                    conversation_id, content, user.id, image_urls, file_urls
                 ):
                     if chunk["type"] == "content":
                         await websocket.send_json({

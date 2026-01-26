@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 export interface Message {
-  id?: number;
+  id?: string;  // Unique ID for React key (generated automatically by addMessage)
+  dbId?: number;  // Database ID (from server)
   role: 'user' | 'assistant';
   content: string;
   imageUrl?: string;
@@ -15,6 +16,10 @@ export interface Message {
     result?: any;
   };
 }
+
+// Generate unique message ID
+const generateMessageId = (): string =>
+  `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 export interface Conversation {
   id: number;
@@ -39,6 +44,7 @@ interface ChatState {
   messages: Message[];
   isLoading: boolean;
   isStreaming: boolean;
+  isUploading: boolean;
   selectedConfluencePage: ConfluencePage | null;
   currentToolCall: { name: string; displayName: string } | null;
 
@@ -55,9 +61,12 @@ interface ChatState {
   updateToolCallResult: (toolName: string, result: any) => void;
   setIsLoading: (loading: boolean) => void;
   setIsStreaming: (streaming: boolean) => void;
+  setIsUploading: (uploading: boolean) => void;
   setSelectedConfluencePage: (page: ConfluencePage | null) => void;
   setCurrentToolCall: (toolCall: { name: string; displayName: string } | null) => void;
   clearChat: () => void;
+  updateLastUserMessage: (imageUrl?: string, fileUrls?: string[]) => void;
+  removeLastMessage: () => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -66,6 +75,7 @@ export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   isLoading: false,
   isStreaming: false,
+  isUploading: false,
   selectedConfluencePage: null,
   currentToolCall: null,
 
@@ -89,10 +99,15 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setCurrentConversationId: (id) => set({ currentConversationId: id }),
 
-  setMessages: (messages) => set({ messages }),
+  setMessages: (messages) => set({
+    messages: messages.map(msg => ({
+      ...msg,
+      id: msg.id || generateMessageId()  // Ensure all messages have id
+    }))
+  }),
 
   addMessage: (message) => set((state) => ({
-    messages: [...state.messages, message]
+    messages: [...state.messages, { ...message, id: message.id || generateMessageId() }]
   })),
 
   updateLastMessage: (content) => set((state) => {
@@ -115,6 +130,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   addToolCallMessage: (toolName, displayName) => set((state) => ({
     messages: [...state.messages, {
+      id: generateMessageId(),
       role: 'assistant' as const,
       content: '',
       toolCall: { name: toolName, displayName, status: 'executing' as const }
@@ -139,11 +155,33 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setIsStreaming: (isStreaming) => set({ isStreaming }),
 
+  setIsUploading: (isUploading) => set({ isUploading }),
+
   setSelectedConfluencePage: (page) => set({ selectedConfluencePage: page }),
 
   setCurrentToolCall: (toolCall) => set({ currentToolCall: toolCall }),
 
-  clearChat: () => set({ messages: [], currentConversationId: null, selectedConfluencePage: null, currentToolCall: null })
+  clearChat: () => set({ messages: [], currentConversationId: null, selectedConfluencePage: null, currentToolCall: null }),
+
+  updateLastUserMessage: (imageUrl?: string, fileUrls?: string[]) => set((state) => {
+    const messages = [...state.messages];
+    // Find the last user message from the end
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        messages[i] = { ...messages[i], imageUrl, fileUrls };
+        break;
+      }
+    }
+    return { messages };
+  }),
+
+  removeLastMessage: () => set((state) => {
+    const messages = [...state.messages];
+    if (messages.length > 0) {
+      messages.pop();
+    }
+    return { messages };
+  })
 }));
 
 // Theme Store

@@ -25,6 +25,7 @@ const Chat: React.FC = () => {
     conversations,
     currentConversationId,
     isLoading,
+    isUploading,
     setConversations,
     addConversation,
     updateConversationTitle,
@@ -36,9 +37,12 @@ const Chat: React.FC = () => {
     updateToolCallResult,
     setIsLoading,
     setIsStreaming,
+    setIsUploading,
     setSelectedConfluencePage,
     setCurrentToolCall,
-    clearChat
+    clearChat,
+    removeLastMessage,
+    updateLastUserMessage
   } = useChatStore();
   const { isSidebarOpen, toggleSidebar } = useUIStore();
   const { theme } = useThemeStore();
@@ -133,11 +137,13 @@ const Chat: React.FC = () => {
           break;
 
         case 'stream_start':
-          setIsStreaming(true);
-          // 不在这里创建空消息，等 stream_chunk 时按需创建
+          // Don't set isStreaming here - wait for actual content
+          // This keeps TypingIndicator visible until content arrives
           break;
 
         case 'stream_chunk':
+          // Set streaming on first chunk so TypingIndicator hides
+          setIsStreaming(true);
           // 检查最后一条消息是否是可追加的 assistant 消息
           const messages = useChatStore.getState().messages;
           const lastMsg = messages[messages.length - 1];
@@ -234,11 +240,28 @@ const Chat: React.FC = () => {
       return;
     }
 
-    // Upload files first if any
-    let fileUrls: string[] = [];
-    let imageUrl: string | undefined;
+    // 1. Create local preview URLs for immediate display
+    const localPreviewUrls = files?.map(file => URL.createObjectURL(file)) || [];
+    const localImageUrls = files?.map((file, idx) =>
+      file.type.startsWith('image/') ? localPreviewUrls[idx] : null
+    ).filter(Boolean) as string[] || [];
+
+    // 2. Immediately show user message with local previews
+    const userMessage: Message = {
+      role: 'user',
+      content,
+      imageUrl: localImageUrls[0],
+      fileUrls: localImageUrls.length > 0 ? localImageUrls : undefined
+    };
+    addMessage(userMessage);
+    setIsLoading(true);
+
+    // 3. If there are files, upload them in background
+    let serverFileUrls: string[] = [];
+    let serverImageUrls: string[] = [];
 
     if (files && files.length > 0) {
+      setIsUploading(true);
       try {
         const formData = new FormData();
         files.forEach(file => formData.append('files', file));
@@ -247,33 +270,36 @@ const Chat: React.FC = () => {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
 
-        fileUrls = response.data.urls || [];
-        // Use first image as imageUrl for backward compatibility
-        const imageFile = files.find(f => f.type.startsWith('image/'));
-        if (imageFile) {
-          imageUrl = fileUrls.find(url => url.includes(imageFile.name));
-        }
+        serverFileUrls = response.data.urls || [];
+        files.forEach((file, index) => {
+          if (file.type.startsWith('image/') && serverFileUrls[index]) {
+            serverImageUrls.push(serverFileUrls[index]);
+          }
+        });
+
+        // Update user message with server URLs (replace local blob URLs)
+        updateLastUserMessage(serverImageUrls[0], serverImageUrls);
+
+        // Clean up local preview URLs after updating
+        localPreviewUrls.forEach(url => URL.revokeObjectURL(url));
       } catch (error) {
         console.error('Failed to upload files:', error);
+        setIsUploading(false);
+        setIsLoading(false);
+        // Clean up and remove the user message on failure
+        localPreviewUrls.forEach(url => URL.revokeObjectURL(url));
+        removeLastMessage();
+        return;
       }
+      setIsUploading(false);
     }
 
-    // Add user message to UI
-    const userMessage: Message = {
-      role: 'user',
-      content,
-      imageUrl,
-      fileUrls
-    };
-    addMessage(userMessage);
-    setIsLoading(true);
-
-    // Send to WebSocket
+    // 4. Send to WebSocket with server URLs
     wsRef.current.send(JSON.stringify({
       conversation_id: currentConversationId,
       content,
-      image_url: imageUrl,
-      file_urls: fileUrls
+      image_urls: serverImageUrls,
+      file_urls: serverFileUrls
     }));
   };
 
@@ -326,6 +352,7 @@ const Chat: React.FC = () => {
           onSendMessage={handleSendMessage}
           onStop={handleStopGeneration}
           isLoading={isLoading}
+          isUploading={isUploading}
         />
       </main>
 

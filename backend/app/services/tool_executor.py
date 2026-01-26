@@ -5,7 +5,6 @@ import mimetypes
 import logging
 from typing import Dict, Any, List, Optional
 from app.services.confluence_service import ConfluenceService
-from app.services.confluence_image_service import ConfluenceImageService
 
 logger = logging.getLogger("tool_executor")
 
@@ -15,13 +14,6 @@ class ToolExecutor:
 
     def __init__(self, confluence_service: Optional[ConfluenceService]):
         self.confluence = confluence_service
-        # Initialize image service if confluence service is available
-        self.image_service = None
-        if confluence_service:
-            self.image_service = ConfluenceImageService(
-                base_url=confluence_service.base_url,
-                auth=confluence_service.auth
-            )
 
     def _extract_page_id(self, page_id_or_url: str) -> str:
         """Extract page ID from URL or return as-is"""
@@ -144,14 +136,17 @@ class ToolExecutor:
                 return await self._insert_column(arguments)
             elif tool_name == "delete_table_column":
                 return await self._delete_column(arguments)
+            elif tool_name == "update_table_cell":
+                return await self._update_cell(arguments)
+            elif tool_name == "insert_table_row":
+                return await self._insert_row(arguments)
+            elif tool_name == "delete_table_row":
+                return await self._delete_row(arguments)
             # Navigation tools
             elif tool_name == "list_children_pages":
                 return await self._list_children(arguments)
             elif tool_name == "get_confluence_spaces":
                 return await self._get_spaces(arguments)
-            # Image analysis
-            elif tool_name == "analyze_confluence_images":
-                return await self._analyze_images(arguments)
             else:
                 return {"success": False, "error": f"Unknown tool: {tool_name}"}
         except Exception as e:
@@ -342,6 +337,9 @@ class ToolExecutor:
         # If new_content looks like Markdown, convert to HTML
         if new_content.strip() and not new_content.strip().startswith('<'):
             new_content = self.confluence.markdown_to_html(new_content)
+        else:
+            # Even for HTML content, process [image:xxx] and ![](xxx) patterns
+            new_content = self.confluence._process_cell_content(new_content)
 
         # Precise replacement (only first occurrence)
         updated_html = current_html.replace(old_content, new_content, 1)
@@ -440,6 +438,93 @@ class ToolExecutor:
             "url": f"{self.confluence.base_url}/pages/viewpage.action?pageId={result['id']}"
         }
 
+    async def _update_cell(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a specific cell in a table"""
+        page_id = self._extract_page_id(args["page_id_or_url"])
+        table_index = args["table_index"]
+        row_index = args["row_index"]
+        column_index = args["column_index"]
+        content = args["content"]
+        append = args.get("append", False)
+
+        # Get current page
+        page = await self.confluence.get_page(page_id)
+        html_content = page.get("body", {}).get("storage", {}).get("value", "")
+        current_version = page.get("version", {}).get("number", 1)
+
+        # Update cell
+        updated_html = self.confluence.update_table_cell(
+            html_content, table_index, row_index, column_index, content, append
+        )
+
+        # Update page
+        result = await self.confluence.update_page(page_id, page["title"], updated_html, current_version)
+
+        return {
+            "success": True,
+            "page_id": result["id"],
+            "title": result["title"],
+            "version": result.get("version", {}).get("number"),
+            "message": f"成功{'追加' if append else '更新'}表格 {table_index} 第 {row_index} 行第 {column_index} 列的内容",
+            "url": f"{self.confluence.base_url}/pages/viewpage.action?pageId={result['id']}"
+        }
+
+    async def _insert_row(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert a new row into a table"""
+        page_id = self._extract_page_id(args["page_id_or_url"])
+        table_index = args["table_index"]
+        row_position = args["row_position"]
+        cell_values = args["cell_values"]
+        is_header = args.get("is_header", False)
+
+        # Get current page
+        page = await self.confluence.get_page(page_id)
+        html_content = page.get("body", {}).get("storage", {}).get("value", "")
+        current_version = page.get("version", {}).get("number", 1)
+
+        # Insert row
+        updated_html = self.confluence.insert_table_row(
+            html_content, table_index, row_position, cell_values, is_header
+        )
+
+        # Update page
+        result = await self.confluence.update_page(page_id, page["title"], updated_html, current_version)
+
+        return {
+            "success": True,
+            "page_id": result["id"],
+            "title": result["title"],
+            "version": result.get("version", {}).get("number"),
+            "message": f"成功在表格 {table_index} 第 {row_position} 位置插入新行",
+            "url": f"{self.confluence.base_url}/pages/viewpage.action?pageId={result['id']}"
+        }
+
+    async def _delete_row(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Delete a row from a table"""
+        page_id = self._extract_page_id(args["page_id_or_url"])
+        table_index = args["table_index"]
+        row_index = args["row_index"]
+
+        # Get current page
+        page = await self.confluence.get_page(page_id)
+        html_content = page.get("body", {}).get("storage", {}).get("value", "")
+        current_version = page.get("version", {}).get("number", 1)
+
+        # Delete row
+        updated_html = self.confluence.delete_table_row(html_content, table_index, row_index)
+
+        # Update page
+        result = await self.confluence.update_page(page_id, page["title"], updated_html, current_version)
+
+        return {
+            "success": True,
+            "page_id": result["id"],
+            "title": result["title"],
+            "version": result.get("version", {}).get("number"),
+            "message": f"成功删除表格 {table_index} 的第 {row_index} 行",
+            "url": f"{self.confluence.base_url}/pages/viewpage.action?pageId={result['id']}"
+        }
+
     # ============ Navigation Tools ============
 
     async def _list_children(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -463,59 +548,4 @@ class ToolExecutor:
             "success": True,
             "count": len(spaces),
             "spaces": spaces
-        }
-
-    # ============ Image Analysis ============
-
-    async def _analyze_images(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze images from a Confluence page"""
-        page_id = args["page_id"]
-        requested_filenames = args.get("image_filenames", [])
-
-        if not self.image_service:
-            return {
-                "success": False,
-                "error": "图片服务未初始化，请先配置 Confluence 凭证"
-            }
-
-        # Get page to retrieve image list
-        page = await self.confluence.get_page(page_id)
-        html_content = page.get("body", {}).get("storage", {}).get("value", "")
-
-        # Extract images from HTML
-        images = self._extract_images(html_content, page_id)
-
-        if not images:
-            return {
-                "success": False,
-                "error": "页面中没有找到图片"
-            }
-
-        # Filter by requested filenames if specified
-        if requested_filenames:
-            images = [img for img in images if img["filename"] in requested_filenames]
-            if not images:
-                return {
-                    "success": False,
-                    "error": f"未找到指定的图片: {requested_filenames}"
-                }
-
-        # Download and process images
-        downloaded_images = await self.image_service.download_images_batch(page_id, images, max_images=5)
-
-        if not downloaded_images:
-            return {
-                "success": False,
-                "error": "无法下载任何图片，请检查图片是否存在或权限是否正确"
-            }
-
-        # Return with multimodal flag for chat_service to handle
-        return {
-            "success": True,
-            "_multimodal": True,
-            "page_id": page_id,
-            "title": page.get("title", ""),
-            "image_count": len(downloaded_images),
-            "images": downloaded_images,
-            "message": f"已加载 {len(downloaded_images)} 张图片，正在解读..."
         }

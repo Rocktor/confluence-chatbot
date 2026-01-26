@@ -4,10 +4,11 @@ Confluence Image Service - Download and process images from Confluence pages
 
 import base64
 import hashlib
-import aiohttp
+import httpx
 import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote
 from PIL import Image
 from io import BytesIO
 from app.utils.logger import setup_logger
@@ -34,7 +35,7 @@ class ConfluenceImageService:
             cache_dir: Directory to cache downloaded images
         """
         self.base_url = base_url.rstrip('/')
-        self.auth = aiohttp.BasicAuth(auth[0], auth[1])
+        self.auth = auth  # Keep as tuple for httpx
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -76,33 +77,71 @@ class ConfluenceImageService:
             logger.info(f"Cache hit: {filename}")
             return await self._process_cached_image(cache_path, filename)
 
-        # Download from Confluence
-        download_url = f"{self.base_url}/download/attachments/{page_id}/{filename}"
-        logger.info(f"Downloading: {download_url}")
-
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Step 1: Get attachment info via REST API
+                api_url = f"{self.base_url}/rest/api/content/{page_id}/child/attachment"
+                logger.info(f"Fetching attachments list from: {api_url}")
+
+                response = await client.get(
+                    api_url,
+                    auth=self.auth,
+                    params={"os_authType": "basic", "filename": filename, "expand": "version,container"}
+                )
+
+                if response.status_code != 200:
+                    logger.error(f"Failed to get attachment info: {response.status_code}")
+                    return None
+
+                attachments = response.json().get('results', [])
+                if not attachments:
+                    logger.error(f"Attachment not found: {filename}")
+                    return None
+
+                # Find the matching attachment
+                attachment = None
+                for att in attachments:
+                    if att.get('title') == filename:
+                        attachment = att
+                        break
+
+                if not attachment:
+                    logger.error(f"Attachment not found in results: {filename}")
+                    return None
+
+                # Step 2: Download using the attachment's download link
+                download_link = attachment.get('_links', {}).get('download', '')
+                if not download_link:
+                    logger.error(f"No download link for: {filename}")
+                    return None
+
+                # Build full download URL
+                download_url = f"{self.base_url}{download_link}"
+                logger.info(f"Downloading attachment: {download_url}")
+
+                download_response = await client.get(
                     download_url,
                     auth=self.auth,
                     params={"os_authType": "basic"},
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status != 200:
-                        logger.error(f"Download failed: {response.status} for {filename}")
-                        return None
+                    follow_redirects=True
+                )
 
-                    content_length = response.headers.get('Content-Length', 0)
-                    if int(content_length) > MAX_IMAGE_SIZE:
-                        logger.warning(f"Image too large ({content_length} bytes): {filename}")
-                        return None
+                if download_response.status_code != 200:
+                    logger.error(f"Download failed: {download_response.status_code} for {filename}")
+                    return None
 
-                    image_data = await response.read()
+                content_length = len(download_response.content)
+                if content_length > MAX_IMAGE_SIZE:
+                    logger.warning(f"Image too large ({content_length} bytes): {filename}")
+                    return None
+
+                image_data = download_response.content
+                logger.info(f"Downloaded {filename}: {content_length} bytes")
 
             # Process and save image
             return await self._process_and_save_image(image_data, cache_path, filename)
 
-        except asyncio.TimeoutError:
+        except httpx.TimeoutException:
             logger.error(f"Download timeout: {filename}")
             return None
         except Exception as e:
@@ -254,17 +293,14 @@ class ConfluenceImageService:
                 logger.info(f"Cache hit for external: {url}")
                 return await self._process_cached_image(cache_path, Path(url).name)
 
-            # Download
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status != 200:
-                        logger.error(f"External download failed: {response.status}")
-                        return None
+            # Download using httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, follow_redirects=True)
+                if response.status_code != 200:
+                    logger.error(f"External download failed: {response.status_code}")
+                    return None
 
-                    image_data = await response.read()
+                image_data = response.content
 
             return await self._process_and_save_image(image_data, cache_path, Path(url).name)
 

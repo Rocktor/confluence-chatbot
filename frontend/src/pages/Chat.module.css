@@ -59,7 +59,7 @@
 .messagesContainer {
   flex: 1;
   overflow-y: auto;
-  scroll-behavior: smooth;
+  /* Removed scroll-behavior: smooth to prevent conflicts with JS scrolling */
 }
 
 /* Responsive */

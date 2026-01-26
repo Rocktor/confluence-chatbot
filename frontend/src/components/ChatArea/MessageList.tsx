@@ -143,25 +143,44 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
             <span className={styles.roleName}>{isUser ? user?.name || '你' : 'AI 助手'}</span>
             {message.createdAt && (
               <span className={styles.timestamp}>
-                {new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                {(() => {
+                  // Backend returns UTC time without timezone suffix, add 'Z' to parse as UTC
+                  const utcTime = message.createdAt.endsWith('Z') ? message.createdAt : message.createdAt + 'Z';
+                  return new Date(utcTime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
+                })()}
               </span>
             )}
           </div>
 
           <div className={`${styles.messageBubble} ${isUser ? styles.userBubble : styles.aiBubble}`}>
-            {/* File attachments */}
+            {/* Images - show all uploaded images as thumbnails */}
             {message.fileUrls && message.fileUrls.length > 0 && (
-              <div className={styles.attachments}>
-                {message.fileUrls.map((url, idx) => (
-                  <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className={styles.attachment}>
-                    📎 附件 {idx + 1}
-                  </a>
-                ))}
+              <div className={styles.imageGrid}>
+                {message.fileUrls
+                  .filter(url => /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(url))
+                  .map((url, idx) => (
+                    <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className={styles.imageThumbnail}>
+                      <img src={url} alt={`图片 ${idx + 1}`} />
+                    </a>
+                  ))}
               </div>
             )}
 
-            {/* Image */}
-            {message.imageUrl && (
+            {/* Non-image file attachments */}
+            {message.fileUrls && message.fileUrls.length > 0 && (
+              <div className={styles.attachments}>
+                {message.fileUrls
+                  .filter(url => !/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(url))
+                  .map((url, idx) => (
+                    <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className={styles.attachment}>
+                      📎 {url.split('/').pop()}
+                    </a>
+                  ))}
+              </div>
+            )}
+
+            {/* Fallback for single imageUrl (legacy) */}
+            {message.imageUrl && !message.fileUrls?.includes(message.imageUrl) && (
               <div className={styles.imageContainer}>
                 <img src={message.imageUrl} alt="上传的图片" className={styles.messageImage} />
               </div>
@@ -193,36 +212,48 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
   );
 };
 
-// Typing indicator
-const TypingIndicator: React.FC = () => (
-  <div className={`${styles.messageWrapper} ${styles.assistant}`}>
-    <div className={styles.messageContainer}>
-      <div className={styles.avatar}>
-        <Icons.Bot />
-      </div>
-      <div className={styles.messageContent}>
-        <div className={styles.messageHeader}>
-          <span className={styles.roleName}>AI 助手</span>
+// Typing indicator with status text
+const TypingIndicator: React.FC = () => {
+  const { isUploading } = useChatStore();
+
+  return (
+    <div className={`${styles.messageWrapper} ${styles.assistant}`}>
+      <div className={styles.messageContainer}>
+        <div className={styles.avatar}>
+          <Icons.Bot />
         </div>
-        <div className={`${styles.messageBubble} ${styles.aiBubble}`}>
-          <div className={styles.typingIndicator}>
-            <span></span>
-            <span></span>
-            <span></span>
+        <div className={styles.messageContent}>
+          <div className={styles.messageHeader}>
+            <span className={styles.roleName}>AI 助手</span>
+          </div>
+          <div className={`${styles.messageBubble} ${styles.aiBubble}`}>
+            <div className={styles.typingIndicator}>
+              <span className={styles.statusText}>
+                {isUploading ? '正在上传附件' : 'AI 正在思考'}
+              </span>
+              <span className={styles.dot}></span>
+              <span className={styles.dot}></span>
+              <span className={styles.dot}></span>
+            </div>
           </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const MessageList: React.FC = () => {
   const { messages, isLoading, isStreaming } = useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevMessageCount = useRef(messages.length);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+    // Only scroll when message count increases (new message added)
+    if (messages.length > prevMessageCount.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    prevMessageCount.current = messages.length;
+  }, [messages.length]);  // Only watch length, not entire array
 
   if (messages.length === 0 && !isLoading) {
     return (
@@ -239,7 +270,7 @@ export const MessageList: React.FC = () => {
   return (
     <div className={styles.messageList}>
       {messages.map((msg, idx) => (
-        <MessageItem key={idx} message={msg} />
+        <MessageItem key={msg.id || `fallback-${idx}`} message={msg} />
       ))}
       {isLoading && !isStreaming && <TypingIndicator />}
       <div ref={messagesEndRef} />

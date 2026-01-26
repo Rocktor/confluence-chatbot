@@ -15,7 +15,7 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    scheduler.add_job(cleanup_service.cleanup_old_files, 'interval', hours=1)
+    scheduler.add_job(cleanup_service.cleanup_old_files, 'interval', minutes=15)
     scheduler.start()
     yield
     # Shutdown
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Confluence Chatbot API",
     description="AI-powered chatbot with Confluence integration",
-    version="2.2.0",
+    version="2.3.0",
     lifespan=lifespan
 )
 
@@ -58,7 +58,7 @@ app.include_router(admin.router)
 
 @app.get("/")
 async def root():
-    return {"message": "Confluence Chatbot API", "version": "2.2.0"}
+    return {"message": "Confluence Chatbot API", "version": "2.3.0"}
 
 @app.get("/health")
 async def health_check():

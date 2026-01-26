@@ -10,12 +10,12 @@ class CleanupService:
         self,
         upload_dir: str = "/app/uploads",
         cache_dir: str = "/app/cache",
-        upload_max_age_hours: int = 24,
+        upload_max_age_minutes: int = 30,
         cache_max_age_hours: int = 24
     ):
         self.upload_dir = Path(upload_dir)
         self.cache_dir = Path(cache_dir)
-        self.upload_max_age_seconds = upload_max_age_hours * 3600
+        self.upload_max_age_seconds = upload_max_age_minutes * 60
         self.cache_max_age_seconds = cache_max_age_hours * 3600
 
     def cleanup_old_files(self) -> int:

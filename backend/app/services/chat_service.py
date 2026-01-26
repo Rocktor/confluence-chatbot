@@ -1,16 +1,22 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from app.models.orm import Conversation, Message, User, TokenUsage, ConfluenceConfig
 from app.services.azure_openai_service import AzureOpenAIService
 from app.services.confluence_service import ConfluenceService
 from app.services.tool_executor import ToolExecutor
 from app.services.tools import CONFLUENCE_TOOLS, SYSTEM_PROMPT
+from app.services.document_parser_service import document_parser
 from app.utils.logger import setup_logger
 from typing import List, Dict, AsyncGenerator, Any, Callable, Optional
+from pathlib import Path
 import asyncio
 import json
+import base64
+import mimetypes
 
 # Maximum messages to keep in context
 MAX_CONTEXT_MESSAGES = 20
+UPLOAD_DIR = Path("/app/uploads")
 
 logger = setup_logger("chat_service")
 
@@ -69,23 +75,38 @@ class ChatService:
         """Get user's conversations"""
         return self.db.query(Conversation).filter(
             Conversation.user_id == user_id
-        ).order_by(Conversation.updated_at.desc()).limit(limit).all()
+        ).order_by(
+            Conversation.updated_at.desc(),
+            Conversation.id.desc()  # Secondary sort key for deterministic ordering
+        ).limit(limit).all()
 
     def add_message(
         self,
         conversation_id: int,
         role: str,
         content: str,
-        image_url: str = None
+        image_url: str = None,
+        image_urls: List[str] = None
     ) -> Message:
         """Add message to conversation"""
+        # Support both single image_url and multiple image_urls
+        file_urls = image_urls if image_urls else ([image_url] if image_url else [])
         message = Message(
             conversation_id=conversation_id,
             role=role,
             content=content,
-            image_url=image_url
+            image_url=image_url or (file_urls[0] if file_urls else None),
+            file_urls=file_urls
         )
         self.db.add(message)
+
+        # Update conversation's updated_at for proper sorting
+        conversation = self.db.query(Conversation).filter(
+            Conversation.id == conversation_id
+        ).first()
+        if conversation:
+            conversation.updated_at = func.now()
+
         self.db.commit()
         self.db.refresh(message)
         return message
@@ -96,16 +117,102 @@ class ChatService:
             Message.conversation_id == conversation_id
         ).order_by(Message.created_at.asc()).all()
 
+    def _get_image_data_url(self, image_url: str) -> Optional[str]:
+        """Convert relative image URL to base64 data URL for OpenAI Vision API"""
+        if not image_url:
+            return None
+
+        # If already a data URL or full URL, return as-is
+        if image_url.startswith('data:') or image_url.startswith('http'):
+            return image_url
+
+        # Handle relative upload URL
+        if image_url.startswith('/uploads/'):
+            relative_path = image_url[9:]  # Remove "/uploads/"
+            file_path = UPLOAD_DIR / relative_path
+            if file_path.exists():
+                try:
+                    content_type, _ = mimetypes.guess_type(str(file_path))
+                    if not content_type:
+                        content_type = 'image/png'
+                    with open(file_path, 'rb') as f:
+                        image_data = base64.b64encode(f.read()).decode('utf-8')
+                    return f"data:{content_type};base64,{image_data}"
+                except Exception as e:
+                    logger.error(f"Failed to read image {file_path}: {e}")
+                    return None
+        return None
+
+    def _get_document_content(self, file_url: str) -> Optional[str]:
+        """
+        Parse document file and return text content
+
+        Args:
+            file_url: Relative URL like /uploads/xxx.pdf
+
+        Returns:
+            Extracted text content or None
+        """
+        if not file_url:
+            return None
+
+        # Handle relative upload URL
+        if file_url.startswith('/uploads/'):
+            relative_path = file_url[9:]  # Remove "/uploads/"
+            file_path = UPLOAD_DIR / relative_path
+            if file_path.exists() and document_parser.is_document(str(file_path)):
+                return document_parser.parse_file(str(file_path))
+
+        return None
+
     def build_message_history(self, messages: List[Message]) -> List[Dict[str, str]]:
-        """Build message history for OpenAI API"""
+        """Build message history for OpenAI API with document and image support"""
         history = []
         for msg in messages:
-            message_dict = {"role": msg.role, "content": msg.content}
-            if msg.image_url:
-                message_dict["content"] = [
-                    {"type": "text", "text": msg.content},
-                    {"type": "image_url", "image_url": {"url": msg.image_url}}
-                ]
+            # Get all file URLs from file_urls or fallback to single image_url
+            all_file_urls = msg.file_urls if msg.file_urls else ([msg.image_url] if msg.image_url else [])
+            all_file_urls = [url for url in all_file_urls if url]  # Filter out None/empty
+
+            # Separate images and documents
+            image_urls = []
+            document_contents = []
+
+            for url in all_file_urls:
+                # Check if it's a document
+                doc_content = self._get_document_content(url)
+                if doc_content:
+                    # Extract filename from URL
+                    filename = url.split('/')[-1] if '/' in url else url
+                    document_contents.append(f"[文件: {filename}]\n{doc_content}")
+                else:
+                    # Treat as image
+                    image_urls.append(url)
+
+            # Build text content with document attachments
+            text_content = msg.content or ""
+            if document_contents:
+                attachment_text = "\n\n附件内容：\n" + "\n\n---\n\n".join(document_contents)
+                text_content = text_content + attachment_text if text_content else attachment_text
+                logger.info(f"Attached {len(document_contents)} document(s) to message")
+
+            message_dict = {"role": msg.role, "content": text_content}
+
+            # Build multimodal content with images
+            if image_urls:
+                # Add image path info to text content so AI knows the file_url for upload_attachment_to_confluence
+                image_path_info = "\n\n[上传的图片文件路径: " + ", ".join(image_urls) + "]"
+                enriched_text = (text_content + image_path_info) if text_content else ("请看这些图片" + image_path_info)
+                content_parts = [{"type": "text", "text": enriched_text}]
+                for url in image_urls:
+                    data_url = self._get_image_data_url(url)
+                    if data_url:
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": data_url, "detail": "high"}
+                        })
+                if len(content_parts) > 1:  # Has at least one image
+                    message_dict["content"] = content_parts
+
             history.append(message_dict)
         return history
 
@@ -186,13 +293,21 @@ class ChatService:
         conversation_id: int,
         user_message: str,
         user_id: int = None,
-        image_url: str = None,
+        image_urls: List[str] = None,
+        file_urls: List[str] = None,
         on_tool_call: Callable[[str, str], None] = None,
         on_tool_result: Callable[[str, Dict], None] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream chat response with tool calling support"""
-        # Add user message
-        self.add_message(conversation_id, "user", user_message, image_url)
+        # Merge image_urls and file_urls for storage
+        all_urls = []
+        if image_urls:
+            all_urls.extend(image_urls)
+        if file_urls:
+            all_urls.extend(file_urls)
+
+        # Add user message with all file URLs
+        self.add_message(conversation_id, "user", user_message, image_urls=all_urls if all_urls else None)
 
         # Get conversation history with limit and add system prompt
         messages = self.get_conversation_messages(conversation_id)
@@ -272,21 +387,24 @@ class ChatService:
             for tc in tool_calls:
                 tool_name = tc["name"]
 
-                # Prevent repeated same tool calls
-                if tool_name == last_tool_name:
-                    same_tool_count += 1
-                    if same_tool_count >= 2:
-                        yield {"type": "content", "content": "\n\n检测到重复操作，已停止。"}
-                        yield {"type": "done"}
-                        return
-                else:
-                    same_tool_count = 0
-                last_tool_name = tool_name
-
                 try:
                     arguments = json.loads(tc["arguments"])
                 except json.JSONDecodeError:
                     arguments = {}
+
+                # Create a signature for this tool call (name + key args)
+                call_signature = f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
+
+                # Prevent repeated IDENTICAL tool calls (same tool + same arguments)
+                if call_signature == last_tool_name:
+                    same_tool_count += 1
+                    if same_tool_count >= 2:
+                        yield {"type": "content", "content": "\n\n检测到重复操作（相同参数），已停止。"}
+                        yield {"type": "done"}
+                        return
+                else:
+                    same_tool_count = 0
+                last_tool_name = call_signature
 
                 # Notify tool call start
                 logger.info(f"Tool call: {tool_name}, args: {arguments}")
@@ -305,42 +423,11 @@ class ChatService:
                     on_tool_result(tool_name, result)
 
                 # Add tool result to history
-                # Handle multimodal results (images)
-                if result.get("_multimodal") and result.get("images"):
-                    # Build multimodal content for GPT Vision
-                    content_parts = [
-                        {"type": "text", "text": f"以下是页面「{result.get('title', '')}」中的 {result.get('image_count', 0)} 张图片，请仔细观察并描述每张图片的内容："}
-                    ]
-                    for img in result["images"]:
-                        content_parts.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": img["data_url"],
-                                "detail": "high"
-                            }
-                        })
-                    message_history.append({
-                        "role": "user",
-                        "content": content_parts
-                    })
-                    # Also add a tool response to satisfy the API
-                    message_history.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": json.dumps({
-                            "success": True,
-                            "message": result.get("message", "图片已加载"),
-                            "image_count": result.get("image_count", 0),
-                            "filenames": [img["filename"] for img in result["images"]]
-                        }, ensure_ascii=False)
-                    })
-                else:
-                    # Regular text result
-                    message_history.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": json.dumps(result, ensure_ascii=False)
-                    })
+                message_history.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": json.dumps(result, ensure_ascii=False)
+                })
 
         # Record token usage if user_id provided
         if user_id and (total_prompt_tokens > 0 or total_completion_tokens > 0):

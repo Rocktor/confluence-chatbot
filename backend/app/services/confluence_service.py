@@ -343,9 +343,10 @@ class ConfluenceService:
                 if not in_table:
                     in_table = True
                     html_lines.append('<table><tbody>')
-                    row = '<tr>' + ''.join(f'<th>{html.escape(c)}</th>' for c in cells) + '</tr>'
+                    # Process cell content for images and Markdown
+                    row = '<tr>' + ''.join(f'<th>{self._process_cell_content(c)}</th>' for c in cells) + '</tr>'
                 else:
-                    row = '<tr>' + ''.join(f'<td>{html.escape(c)}</td>' for c in cells) + '</tr>'
+                    row = '<tr>' + ''.join(f'<td>{self._process_cell_content(c)}</td>' for c in cells) + '</tr>'
                 html_lines.append(row)
                 continue
             elif in_table:
@@ -591,6 +592,240 @@ class ConfluenceService:
 
         # Process all rows
         new_table_html = re.sub(r'<tr[^>]*>.*?</tr>', process_row, table_html, flags=re.DOTALL)
+
+        # Replace table in content
+        return html_content[:table_match.start()] + new_table_html + html_content[table_match.end():]
+
+    def update_table_cell(self, html_content: str, table_index: int, row_index: int,
+                          column_index: int, content: str, append: bool = False) -> str:
+        """Update a specific cell in a table
+
+        Args:
+            html_content: Page HTML content
+            table_index: Table index (0-based)
+            row_index: Row index (0=header row, 1=first data row)
+            column_index: Column index (0-based)
+            content: New content (text, HTML, Markdown, or [image:filename.png])
+            append: If True, append to existing content; if False, replace
+
+        Returns:
+            Updated HTML content
+        """
+        tables = list(re.finditer(r'<table[^>]*>.*?</table>', html_content, re.DOTALL))
+
+        if table_index >= len(tables):
+            raise ValueError(f"表格索引 {table_index} 超出范围（共 {len(tables)} 个表格）")
+
+        table_match = tables[table_index]
+        table_html = table_match.group(0)
+
+        # Find all rows
+        rows = list(re.finditer(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL))
+
+        if row_index >= len(rows):
+            raise ValueError(f"行索引 {row_index} 超出范围（共 {len(rows)} 行）")
+
+        row_match = rows[row_index]
+        row_html = row_match.group(0)
+
+        # Check for colspan/rowspan in this row
+        if 'colspan' in row_html.lower() or 'rowspan' in row_html.lower():
+            raise ValueError("该行包含合并单元格（colspan/rowspan），请使用 edit_confluence_page 直接编辑 HTML")
+
+        # Find all cells in this row
+        cells = list(re.finditer(r'<(t[hd])([^>]*)>(.*?)</\1>', row_html, re.DOTALL))
+
+        if column_index >= len(cells):
+            raise ValueError(f"列索引 {column_index} 超出范围（该行共 {len(cells)} 列）")
+
+        cell_match = cells[column_index]
+        tag = cell_match.group(1)  # 'th' or 'td'
+        attrs = cell_match.group(2)  # preserve attributes like style
+        old_content = cell_match.group(3)
+
+        # Process content: handle [image:filename] syntax
+        new_content = self._process_cell_content(content)
+
+        # Append or replace
+        if append:
+            final_content = old_content + new_content
+        else:
+            final_content = new_content
+
+        # Build new cell
+        new_cell = f'<{tag}{attrs}>{final_content}</{tag}>'
+
+        # Replace cell in row
+        new_row_html = row_html[:cell_match.start()] + new_cell + row_html[cell_match.end():]
+
+        # Replace row in table
+        new_table_html = table_html[:row_match.start()] + new_row_html + table_html[row_match.end():]
+
+        # Replace table in content
+        return html_content[:table_match.start()] + new_table_html + html_content[table_match.end():]
+
+    def _process_cell_content(self, content: str) -> str:
+        """Process cell content, handling special syntax like [image:filename] and basic Markdown"""
+        # Handle [image:filename.png] syntax first
+        image_pattern = r'\[image:([^\]]+)\]'
+
+        def replace_image(match):
+            filename = match.group(1)
+            return f'<ac:image><ri:attachment ri:filename="{html.escape(filename)}"/></ac:image>'
+
+        processed = re.sub(image_pattern, replace_image, content)
+
+        # Handle Markdown image syntax ![alt](filename) - works even inside HTML
+        def replace_md_image(match):
+            filename = match.group(2)
+            # If it's just a filename (not a URL), treat as attachment
+            if not filename.startswith('http'):
+                return f'<ac:image><ri:attachment ri:filename="{html.escape(filename)}"/></ac:image>'
+            return f'<img src="{html.escape(filename)}"/>'
+
+        processed = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', replace_md_image, processed)
+
+        # Process inline Markdown formatting (bold, italic) even in HTML content
+        # Bold: **text** or __text__
+        processed = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', processed)
+        processed = re.sub(r'__(.+?)__', r'<strong>\1</strong>', processed)
+
+        # Italic: *text* (but not ** which is bold)
+        processed = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', processed)
+
+        # If content already looks like HTML (starts with <) and has been processed, return
+        if processed.strip().startswith('<'):
+            return processed
+
+        # For non-HTML content, do full Markdown conversion (links, code, etc.)
+        processed = self._markdown_to_html(processed)
+
+        return processed
+
+    def _markdown_to_html(self, text: str) -> str:
+        """Convert basic Markdown syntax to HTML for Confluence"""
+        # Images FIRST: ![alt](filename) - must come before links to avoid conflict
+        def replace_md_image(match):
+            filename = match.group(2)
+            # If it's just a filename (not a URL), treat as attachment
+            if not filename.startswith('http'):
+                return f'<ac:image><ri:attachment ri:filename="{html.escape(filename)}"/></ac:image>'
+            return f'<img src="{html.escape(filename)}"/>'
+
+        text = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', replace_md_image, text)
+
+        # Bold: **text** or __text__
+        text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+        text = re.sub(r'__(.+?)__', r'<strong>\1</strong>', text)
+
+        # Italic: *text* or _text_ (but not inside URLs or already processed)
+        text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', text)
+
+        # Inline code: `code`
+        text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+
+        # Links: [text](url) - after images to avoid matching ![alt](url)
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+
+        # Line breaks: \n to <br/> (but preserve existing <br> tags)
+        # Don't convert if there's already HTML tags
+        if '<' not in text or text.count('<br') > 0:
+            text = text.replace('\n', '<br/>')
+
+        return text
+
+    def insert_table_row(self, html_content: str, table_index: int, row_position: int,
+                         cell_values: list, is_header: bool = False) -> str:
+        """Insert a new row into a table
+
+        Args:
+            html_content: Page HTML content
+            table_index: Table index (0-based)
+            row_position: Insert position (0=before header, 1=after header, ...)
+            cell_values: List of cell values
+            is_header: If True, create <th> cells; if False, create <td> cells
+
+        Returns:
+            Updated HTML content
+        """
+        tables = list(re.finditer(r'<table[^>]*>.*?</table>', html_content, re.DOTALL))
+
+        if table_index >= len(tables):
+            raise ValueError(f"表格索引 {table_index} 超出范围（共 {len(tables)} 个表格）")
+
+        table_match = tables[table_index]
+        table_html = table_match.group(0)
+
+        # Find all rows
+        rows = list(re.finditer(r'<tr[^>]*>.*?</tr>', table_html, re.DOTALL))
+
+        if row_position > len(rows):
+            raise ValueError(f"行位置 {row_position} 超出范围（可插入位置 0-{len(rows)}）")
+
+        # Build new row
+        tag = 'th' if is_header else 'td'
+        cells_html = ''.join(f'<{tag}>{self._process_cell_content(str(v))}</{tag}>' for v in cell_values)
+        new_row = f'<tr>{cells_html}</tr>'
+
+        # Insert at position
+        if row_position == 0:
+            # Insert before first row
+            if rows:
+                insert_pos = rows[0].start()
+            else:
+                # Empty table - insert after <tbody> or <table>
+                tbody_match = re.search(r'<tbody[^>]*>', table_html)
+                if tbody_match:
+                    insert_pos = tbody_match.end()
+                else:
+                    # Insert after <table...>
+                    table_tag_match = re.match(r'<table[^>]*>', table_html)
+                    insert_pos = table_tag_match.end() if table_tag_match else 0
+        elif row_position >= len(rows):
+            # Insert after last row
+            insert_pos = rows[-1].end()
+        else:
+            # Insert after the row at position-1
+            insert_pos = rows[row_position - 1].end()
+
+        new_table_html = table_html[:insert_pos] + new_row + table_html[insert_pos:]
+
+        # Replace table in content
+        return html_content[:table_match.start()] + new_table_html + html_content[table_match.end():]
+
+    def delete_table_row(self, html_content: str, table_index: int, row_index: int) -> str:
+        """Delete a row from a table
+
+        Args:
+            html_content: Page HTML content
+            table_index: Table index (0-based)
+            row_index: Row index to delete (0=header row, 1=first data row)
+
+        Returns:
+            Updated HTML content
+        """
+        tables = list(re.finditer(r'<table[^>]*>.*?</table>', html_content, re.DOTALL))
+
+        if table_index >= len(tables):
+            raise ValueError(f"表格索引 {table_index} 超出范围（共 {len(tables)} 个表格）")
+
+        table_match = tables[table_index]
+        table_html = table_match.group(0)
+
+        # Find all rows
+        rows = list(re.finditer(r'<tr[^>]*>.*?</tr>', table_html, re.DOTALL))
+
+        if row_index >= len(rows):
+            raise ValueError(f"行索引 {row_index} 超出范围（共 {len(rows)} 行）")
+
+        # Check for colspan/rowspan
+        row_html = rows[row_index].group(0)
+        if 'rowspan' in row_html.lower():
+            raise ValueError("该行包含跨行单元格（rowspan），删除可能破坏表格结构，请使用 edit_confluence_page 直接编辑")
+
+        # Remove the row
+        row_match = rows[row_index]
+        new_table_html = table_html[:row_match.start()] + table_html[row_match.end():]
 
         # Replace table in content
         return html_content[:table_match.start()] + new_table_html + html_content[table_match.end():]

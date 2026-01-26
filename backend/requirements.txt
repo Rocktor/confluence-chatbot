@@ -19,3 +19,6 @@ Pillow==10.2.0
 aiofiles==23.2.1
 aiohttp==3.9.3
 apscheduler==3.10.4
+python-docx==1.1.0
+PyMuPDF==1.23.8
+chardet==5.2.0

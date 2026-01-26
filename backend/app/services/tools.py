@@ -241,26 +241,99 @@ CONFLUENCE_TOOLS = [
             }
         }
     },
-    # ============ 图片解读工具 ============
     {
         "type": "function",
         "function": {
-            "name": "analyze_confluence_images",
-            "description": "解读 Confluence 页面中的图片/图表/截图内容。当用户想要了解页面中图片的含义、或者想让 AI 看图片时使用此工具。需要先调用 read_confluence_page 获取页面信息。",
+            "name": "update_table_cell",
+            "description": "编辑 Confluence 页面表格中的指定单元格。支持文本、HTML 和图片插入。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "page_id": {
+                    "page_id_or_url": {
                         "type": "string",
-                        "description": "页面 ID（从 read_confluence_page 返回结果中获取）"
+                        "description": "页面 ID 或 URL"
                     },
-                    "image_filenames": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "可选，指定要解读的图片文件名列表。不指定则解读所有图片（最多5张）"
+                    "table_index": {
+                        "type": "integer",
+                        "description": "表格索引，从 0 开始（先用 list_confluence_tables 查看）"
+                    },
+                    "row_index": {
+                        "type": "integer",
+                        "description": "行索引（0=表头，1=第一数据行，2=第二数据行...）"
+                    },
+                    "column_index": {
+                        "type": "integer",
+                        "description": "列索引，从 0 开始"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "新内容。支持：普通文本、HTML、[image:filename.png] 插入图片"
+                    },
+                    "append": {
+                        "type": "boolean",
+                        "description": "是否追加到现有内容后面（默认 false 替换）"
                     }
                 },
-                "required": ["page_id"]
+                "required": ["page_id_or_url", "table_index", "row_index", "column_index", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "insert_table_row",
+            "description": "在 Confluence 页面表格中插入新行。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id_or_url": {
+                        "type": "string",
+                        "description": "页面 ID 或 URL"
+                    },
+                    "table_index": {
+                        "type": "integer",
+                        "description": "表格索引，从 0 开始"
+                    },
+                    "row_position": {
+                        "type": "integer",
+                        "description": "插入位置（1=表头后第一行，2=第二行...末尾可用表格行数）"
+                    },
+                    "cell_values": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "每列的值，如 [\"值1\", \"值2\", \"值3\"]。支持 [image:filename.png] 语法"
+                    },
+                    "is_header": {
+                        "type": "boolean",
+                        "description": "是否为表头行（默认 false 为数据行）"
+                    }
+                },
+                "required": ["page_id_or_url", "table_index", "row_position", "cell_values"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_table_row",
+            "description": "删除 Confluence 页面表格中的指定行。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id_or_url": {
+                        "type": "string",
+                        "description": "页面 ID 或 URL"
+                    },
+                    "table_index": {
+                        "type": "integer",
+                        "description": "表格索引，从 0 开始"
+                    },
+                    "row_index": {
+                        "type": "integer",
+                        "description": "要删除的行索引（0=表头，1=第一数据行...）"
+                    }
+                },
+                "required": ["page_id_or_url", "table_index", "row_index"]
             }
         }
     },
@@ -301,8 +374,29 @@ SYSTEM_PROMPT = """你是一个智能文档助手，可以帮助用户管理 Con
 ## 核心规则
 
 1. 调用 read_confluence_page 后，必须向用户总结或回答问题，不能沉默
-2. 不要连续多次调用同一个工具
-3. 如果内容太长，只总结关键要点
+2. 如果内容太长，只总结关键要点
+3. **图片上传必须两步完成**：上传附件后，必须再调用工具把图片插入到页面内容中！
+
+## ⚠️ 图片上传的正确流程（最重要！）
+
+当用户上传图片要插入 Confluence 页面时，**必须按顺序完成以下两步**：
+
+**第1步：上传附件**
+```
+upload_attachment_to_confluence(page_id="123", file_url="/uploads/xxx.jpg")
+→ 返回 {"success": true, "filename": "xxx.jpg"}
+```
+
+**第2步：插入图片到页面（必须执行！）**
+上传成功后，**必须立即**调用以下工具之一把图片插入页面：
+- 插入表格单元格：`update_table_cell(content="[image:xxx.jpg]")`
+- 插入表格新行：`insert_table_row(cell_values=["[image:xxx.jpg]", "说明文字"])`
+- 插入正文：`edit_confluence_page(new_content="<ac:image><ri:attachment ri:filename=\"xxx.jpg\"/></ac:image>")`
+
+**⚠️ 注意**：
+1. 表格操作使用 `[image:filename]` 语法，系统会自动转换
+2. Markdown 格式（如 `**粗体**`）会自动转换为 HTML
+3. 只执行第1步不会在页面显示图片！必须执行第2步！
 
 ## 可用工具
 
@@ -315,14 +409,11 @@ SYSTEM_PROMPT = """你是一个智能文档助手，可以帮助用户管理 Con
 - search_confluence: 搜索页面
 - upload_attachment_to_confluence: 上传附件到页面
 
-### 图片解读 🖼️
-- analyze_confluence_images: 解读页面中的图片/图表/截图
-  - 读取页面后，如果页面包含图片，可以询问用户是否需要解读
-  - 用户要求"看看图片"、"解读图表"时使用此工具
-  - 最多同时解读 5 张图片
-
 ### 表格操作 ⭐
 - list_confluence_tables: 列出页面中的所有表格信息
+- update_table_cell: 编辑指定单元格（支持文本、HTML、图片）⬅️ 核心功能
+- insert_table_row: 在表格中插入新行
+- delete_table_row: 删除表格中的指定行
 - insert_table_column: 在表格中插入新列
 - delete_table_column: 删除表格中的指定列
 
@@ -345,17 +436,24 @@ SYSTEM_PROMPT = """你是一个智能文档助手，可以帮助用户管理 Con
 - 用户明确要求重写整个页面
 - 原有内容不需要保留
 
-## 图片解读策略
-
-1. 读取页面后，如果返回结果包含 `images` 数组，可以告诉用户"页面包含 X 张图片，需要我帮您解读吗？"
-2. 用户确认后，调用 analyze_confluence_images 解读图片
-3. 解读完成后，结合图片内容和文本内容，给出完整的分析
-
 ## 表格操作策略
 
 1. 先调用 list_confluence_tables 查看页面有哪些表格
-2. 确认表格索引（从 0 开始）和列位置后再操作
-3. 插入/删除列会自动处理跨列标题行
+2. 确认表格索引（从 0 开始）、行索引、列索引后再操作
+3. 行索引：0=表头行，1=第一数据行，2=第二数据行...
+4. 列索引：从 0 开始
+
+### 单元格编辑（update_table_cell）
+- 修改某个单元格内容：指定 table_index、row_index、column_index
+- 插入图片：content 使用 [image:filename.png] 语法（先上传附件！）
+- 追加内容：设置 append=true
+
+### 行操作
+- insert_table_row: 在指定位置插入新行，cell_values 提供每列的值
+- delete_table_row: 删除指定行
+
+### 注意事项
+- 遇到 colspan/rowspan（合并单元格）会返回错误，建议用 edit_confluence_page 直接编辑 HTML
 
 ## Markdown 格式规范（重要）
 

@@ -56,7 +56,10 @@ async def search_conversations(
     return db.query(Conversation).filter(
         Conversation.user_id == current_user.id,
         Conversation.title.ilike(f"%{q}%")
-    ).order_by(Conversation.updated_at.desc()).limit(20).all()
+    ).order_by(
+        Conversation.updated_at.desc(),
+        Conversation.id.desc()  # Secondary sort key for deterministic ordering
+    ).limit(20).all()
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
