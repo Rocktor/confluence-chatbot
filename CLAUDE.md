@@ -540,6 +540,98 @@ def _markdown_to_html(self, text: str) -> str:
 
 ---
 
+### 14. Docker 前端构建缓存问题
+
+**问题**：修改前端代码后，Docker 构建的镜像里没有新代码，或者 Vite 生成的 JS 文件哈希没变。
+
+**根因**：
+1. Docker BuildKit 有激进的缓存策略
+2. Vite 可能有 node_modules/.vite 缓存
+3. 本地 dist 目录可能被复制到构建上下文中
+
+**解决方案**：在 Dockerfile 中添加清除缓存步骤
+
+```dockerfile
+FROM node:18-alpine as builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+
+# ✅ 清除缓存，确保使用最新代码构建
+RUN rm -rf dist node_modules/.vite node_modules/.cache
+
+RUN npm run build
+```
+
+**验证命令**：
+```bash
+# 检查容器里是否有新代码
+docker compose exec frontend sh -c 'cat /usr/share/nginx/html/assets/index-*.js | grep -o "你的新代码关键字"'
+
+# 完全重建前端
+docker compose build frontend --no-cache && docker compose up -d --force-recreate frontend
+```
+
+**涉及文件**：`frontend/Dockerfile`
+
+---
+
+### 15. 前端更新后用户看不到变化
+
+**问题**：Docker 构建部署成功，但用户浏览器里还是旧版本。
+
+**原因**：浏览器缓存了旧的 JS/CSS 文件。
+
+**解决方案**：
+1. 告知用户强制刷新：`Ctrl+Shift+R` (Windows/Linux) 或 `Cmd+Shift+R` (Mac)
+2. 或者清除浏览器缓存后刷新
+
+---
+
+## ⚠️ 前端修改必须手动测试
+
+**这是血泪教训，必须遵守！**
+
+### 问题背景
+
+修改前端代码后，只做了：
+1. ✅ 写代码
+2. ✅ 构建部署
+3. ❌ **没有在浏览器里实际操作测试**
+4. 直接告诉用户"已修复"
+
+结果：用户反馈功能不生效，实际上是 UX 设计缺陷（测试成功后用户以为配置已保存，但实际需要再点保存按钮）。
+
+### 强制要求
+
+**修改前端交互逻辑后，必须：**
+
+1. **以新用户视角** 在浏览器里走完整流程
+2. 不要假设用户知道操作步骤
+3. 特别注意：
+   - 表单提交流程（是否需要额外点击？）
+   - 成功/失败反馈是否清晰？
+   - 用户是否知道下一步该做什么？
+
+### 测试检查清单
+
+修改前端后，至少验证：
+
+- [ ] 在浏览器中打开页面（强制刷新 Ctrl+Shift+R）
+- [ ] 模拟新用户操作：不看代码，只看界面提示
+- [ ] 验证成功路径：操作 → 反馈 → 结果符合预期
+- [ ] 验证失败路径：错误提示是否清晰？
+- [ ] 检查控制台是否有报错
+
+### 为什么不能只看代码
+
+- 开发者知道内部逻辑，会"自动"做正确的操作
+- 新用户只看界面提示，容易误解
+- UX 问题无法通过代码审查发现，只能通过实际操作发现
+
+---
+
 ## 调试技巧
 
 ### 后端日志

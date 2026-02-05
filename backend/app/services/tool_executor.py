@@ -127,6 +127,8 @@ class ToolExecutor:
                 return await self._create_page(arguments)
             elif tool_name == "search_confluence":
                 return await self._search(arguments)
+            elif tool_name == "move_confluence_page":
+                return await self._move_page(arguments)
             elif tool_name == "upload_attachment_to_confluence":
                 return await self._upload_attachment(arguments)
             # Table operations
@@ -292,6 +294,14 @@ class ToolExecutor:
             "count": len(results),
             "results": results
         }
+
+    async def _move_page(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Move Confluence page to a new parent"""
+        page_id = self._extract_page_id(args["page_id_or_url"])
+        new_parent_id = self._extract_page_id(args["new_parent_id_or_url"])
+
+        result = await self.confluence.move_page(page_id, new_parent_id)
+        return result
 
     async def _upload_attachment(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Upload attachment to Confluence page"""

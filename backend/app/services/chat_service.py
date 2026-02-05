@@ -414,7 +414,10 @@ class ChatService:
 
                 # Execute tool
                 result = await self.tool_executor.execute(tool_name, arguments)
-                logger.info(f"Tool result: {tool_name}, success: {result.get('success', False)}")
+                if result.get('success'):
+                    logger.info(f"Tool result: {tool_name}, success: True")
+                else:
+                    logger.error(f"Tool result: {tool_name}, success: False, error: {result.get('error', 'Unknown error')}")
                 has_tool_executed = True
 
                 # Notify tool result

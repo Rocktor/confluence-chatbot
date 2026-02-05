@@ -143,6 +143,58 @@ class ConfluenceService:
                 })
             return results
 
+    async def move_page(self, page_id: str, new_parent_id: str) -> Dict:
+        """Move a Confluence page to a new parent page"""
+        # Get current page info
+        url = f"{self.base_url}/rest/api/content/{page_id}"
+        params = {"expand": "version,space", "os_authType": "basic"}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, auth=self.auth, params=params)
+            if response.status_code != 200:
+                return {
+                    "success": False,
+                    "error": f"Failed to get page info: {response.status_code}"
+                }
+
+            page_data = response.json()
+            current_version = page_data['version']['number']
+            title = page_data['title']
+
+            # Update page with new parent
+            update_data = {
+                "type": "page",
+                "title": title,
+                "version": {"number": current_version + 1},
+                "ancestors": [{"id": new_parent_id}]
+            }
+
+            response = await client.put(
+                url,
+                json=update_data,
+                auth=self.auth,
+                params={"os_authType": "basic"}
+            )
+
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "page_id": page_id,
+                    "new_parent_id": new_parent_id,
+                    "title": title,
+                    "url": f"{self.base_url}/pages/viewpage.action?pageId={page_id}"
+                }
+            else:
+                error_msg = response.text
+                try:
+                    error_msg = response.json().get('message', response.text)
+                except:
+                    pass
+                return {
+                    "success": False,
+                    "error": f"Failed to move page: {error_msg}"
+                }
+
     async def upload_attachment(self, page_id: str, file_path: str, filename: str, content_type: str = "application/octet-stream") -> Dict:
         """Upload attachment to Confluence page"""
         url = f"{self.base_url}/rest/api/content/{page_id}/child/attachment"
@@ -666,7 +718,10 @@ class ConfluenceService:
 
     def _process_cell_content(self, content: str) -> str:
         """Process cell content, handling special syntax like [image:filename] and basic Markdown"""
-        # Handle [image:filename.png] syntax first
+        # First, escape HTML special characters (but preserve [image:] and markdown syntax)
+        # We need to escape & < > but be careful with markdown patterns
+
+        # Handle [image:filename.png] syntax first (before escaping)
         image_pattern = r'\[image:([^\]]+)\]'
 
         def replace_image(match):
@@ -685,6 +740,14 @@ class ConfluenceService:
 
         processed = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', replace_md_image, processed)
 
+        # If content already looks like HTML (starts with <), return as-is
+        if processed.strip().startswith('<'):
+            return processed
+
+        # Now escape HTML special characters for plain text content
+        # This must happen AFTER image syntax processing but BEFORE markdown formatting
+        processed = html.escape(processed)
+
         # Process inline Markdown formatting (bold, italic) even in HTML content
         # Bold: **text** or __text__
         processed = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', processed)
@@ -692,10 +755,6 @@ class ConfluenceService:
 
         # Italic: *text* (but not ** which is bold)
         processed = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', processed)
-
-        # If content already looks like HTML (starts with <) and has been processed, return
-        if processed.strip().startswith('<'):
-            return processed
 
         # For non-HTML content, do full Markdown conversion (links, code, etc.)
         processed = self._markdown_to_html(processed)

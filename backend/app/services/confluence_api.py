@@ -419,6 +419,71 @@ class ConfluenceAPI:
         response = self._request("DELETE", f"/rest/api/content/{page_id}")
         return response.status_code == 204
 
+    def move_page(self, page_id: str, new_parent_id: str) -> Dict[str, Any]:
+        """
+        移动页面到新的父页面下
+
+        Args:
+            page_id: 要移动的页面 ID 或 URL
+            new_parent_id: 新的父页面 ID 或 URL
+
+        Returns:
+            {"success": True/False, "page_id": str, "new_parent_id": str, "title": str, "url": str}
+        """
+        page_id = self._extract_page_id(page_id)
+        new_parent_id = self._extract_page_id(new_parent_id)
+
+        # Get current page info
+        response = self._request(
+            "GET",
+            f"/rest/api/content/{page_id}",
+            params={"expand": "version,space"}
+        )
+
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"Failed to get page info: {response.status_code}"
+            }
+
+        page_data = response.json()
+        current_version = page_data['version']['number']
+        space_key = page_data['space']['key']
+        title = page_data['title']
+
+        # Update page with new parent
+        update_data = {
+            "type": "page",
+            "title": title,
+            "version": {"number": current_version + 1},
+            "ancestors": [{"id": new_parent_id}]
+        }
+
+        response = self._request(
+            "PUT",
+            f"/rest/api/content/{page_id}",
+            json=update_data
+        )
+
+        if response.status_code == 200:
+            return {
+                "success": True,
+                "page_id": page_id,
+                "new_parent_id": new_parent_id,
+                "title": title,
+                "url": f"{self.base_url}/pages/viewpage.action?pageId={page_id}"
+            }
+        else:
+            error_msg = response.text
+            try:
+                error_msg = response.json().get('message', response.text)
+            except:
+                pass
+            return {
+                "success": False,
+                "error": f"Failed to move page: {error_msg}"
+            }
+
     def search(self, keyword: str, space: str = None, limit: int = 10) -> List[Dict]:
         """
         搜索页面

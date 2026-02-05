@@ -146,6 +146,27 @@ export const SettingsDialog: React.FC = () => {
         config_id: config.id || null
       });
       setTestResult('success');
+
+      // 测试成功后自动保存配置
+      try {
+        const payload = {
+          base_url: config.baseUrl,
+          email: config.email,
+          api_token: config.apiToken || null,
+          space_key: config.spaceKey || null
+        };
+        if (config.id) {
+          await api.put(`/api/confluence/configs/${config.id}`, payload);
+        } else {
+          const response = await api.post('/api/confluence/configs', payload);
+          // 更新 config.id 以便后续操作
+          setConfig(prev => ({ ...prev, id: response.data.id }));
+        }
+      } catch (saveErr) {
+        console.error('Auto-save after test failed:', saveErr);
+        // 保存失败不影响测试成功的显示，但提示用户
+        setError('测试成功，但自动保存失败，请手动点击保存');
+      }
     } catch (err) {
       setTestResult('error');
     } finally {
@@ -204,26 +225,21 @@ export const SettingsDialog: React.FC = () => {
               className={styles.input}
             />
             <span className={styles.hint}>
-              在 <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer">Atlassian 账户设置</a> 中创建 API Token
+              {config.apiToken ? (
+                <span style={{ color: '#10b981' }}>✓ 已输入 {config.apiToken.length} 字符</span>
+              ) : config.id ? (
+                '留空将使用已保存的 Token'
+              ) : (
+                <>在 <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer">Atlassian 账户设置</a> 中创建 API Token</>
+              )}
             </span>
-          </div>
-
-          <div className={styles.formGroup}>
-            <label className={styles.label}>默认空间 Key（可选）</label>
-            <input
-              type="text"
-              value={config.spaceKey}
-              onChange={e => setConfig({ ...config, spaceKey: e.target.value })}
-              placeholder="例如: DOCS"
-              className={styles.input}
-            />
           </div>
 
           {/* Test result */}
           {testResult && (
             <div className={`${styles.testResult} ${styles[testResult]}`}>
               {testResult === 'success' ? <Icons.Check /> : <Icons.AlertCircle />}
-              <span>{testResult === 'success' ? '连接成功' : '连接失败，请检查配置'}</span>
+              <span>{testResult === 'success' ? '连接成功，配置已自动保存' : '连接失败，请检查配置'}</span>
             </div>
           )}
 

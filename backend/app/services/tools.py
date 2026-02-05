@@ -147,6 +147,27 @@ CONFLUENCE_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "move_confluence_page",
+            "description": "移动 Confluence 页面到新的父页面下。当用户要求移动页面、调整目录结构、把页面挪到另一个位置时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id_or_url": {
+                        "type": "string",
+                        "description": "要移动的页面 ID 或 URL"
+                    },
+                    "new_parent_id_or_url": {
+                        "type": "string",
+                        "description": "目标父页面 ID 或 URL（页面将移动到此页面下）"
+                    }
+                },
+                "required": ["page_id_or_url", "new_parent_id_or_url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "upload_attachment_to_confluence",
             "description": "上传附件（图片或文件）到 Confluence 页面。当用户上传了图片并要求添加到某个页面时使用。",
             "parameters": {

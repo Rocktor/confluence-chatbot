@@ -7,6 +7,9 @@ RUN npm install
 
 COPY . .
 
+# Clear any cached build artifacts
+RUN rm -rf dist node_modules/.vite node_modules/.cache
+
 ARG VITE_API_URL=https://cf.rocktor.shop
 ARG VITE_WS_URL=wss://cf.rocktor.shop/api/chat/ws
 ENV VITE_API_URL=$VITE_API_URL
