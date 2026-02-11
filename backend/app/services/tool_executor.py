@@ -342,6 +342,9 @@ class ToolExecutor:
             return {
                 "success": False,
                 "error": "未找到要替换的内容。请确保 old_content 与页面中的 HTML 完全匹配。"
+                         "建议：1) 重新 read_confluence_page 获取最新 HTML；"
+                         "2) 如果是修改表格内容，请改用 update_table_cell 工具；"
+                         "3) 请勿使用 update_confluence_page 重写整个页面！"
             }
 
         # If new_content looks like Markdown, convert to HTML

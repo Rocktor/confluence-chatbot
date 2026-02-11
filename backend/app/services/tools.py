@@ -444,18 +444,30 @@ upload_attachment_to_confluence(page_id="123", file_url="/uploads/xxx.jpg")
 
 ## 编辑策略（重要）
 
+### ⛔ 绝对禁止的行为
+- **edit_confluence_page 失败后，绝对不要使用 update_confluence_page 重写整个页面！**
+- 如果 edit_confluence_page 返回"未找到要替换的内容"，应该：
+  1. 重新调用 read_confluence_page 获取最新 HTML
+  2. 从 html 字段中更精确地复制要替换的 HTML 片段
+  3. 如果是表格内容，改用 update_table_cell 工具
+  4. 绝不能因为精确编辑失败就改用全量替换
+
+### 表格内容修改（最常见场景）
+- **修改表格单元格内容时，必须优先使用 update_table_cell**
+- 操作步骤：先 list_confluence_tables → 确认索引 → update_table_cell
+- 只有当 update_table_cell 因 colspan/rowspan 失败时，才用 edit_confluence_page 直接编辑 HTML
+
 ### 优先使用 edit_confluence_page（精确编辑）
-- 修改某一段、某个标题、某个表格
+- 修改正文段落、标题等非表格内容
 - 需要保留原有格式和图片
 - 从 read_confluence_page 返回的 `html` 字段中找到要修改的 HTML 片段
 
 ### 使用 insert_content_to_confluence_page
-- 在开头添加总结
-- 在结尾添加内容
+- 在开头添加总结、在结尾添加内容
 
 ### 仅在必要时使用 update_confluence_page
-- 用户明确要求重写整个页面
-- 原有内容不需要保留
+- 仅当用户明确要求"重写整个页面"或"替换全部内容"时
+- **绝不能作为 edit_confluence_page 失败的后备方案！**
 
 ## 表格操作策略
 

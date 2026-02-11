@@ -23,7 +23,7 @@ interface User {
   lastLoginAt: string;
   createdAt: string;
   totalTokens: number;
-  tokens30d: number;
+  recentTokens: number;
 }
 
 interface TokenUsage {
@@ -201,7 +201,7 @@ const Admin: React.FC = () => {
                   <th>邮箱</th>
                   <th>角色</th>
                   <th>状态</th>
-                  <th>30天Token</th>
+                  <th>7天Token</th>
                   <th>总Token</th>
                   <th>最后登录</th>
                   <th>操作</th>
@@ -223,7 +223,7 @@ const Admin: React.FC = () => {
                         {u.isActive ? '启用' : '禁用'}
                       </span>
                     </td>
-                    <td>{formatNumber(u.tokens30d || 0)}</td>
+                    <td>{formatNumber(u.recentTokens || 0)}</td>
                     <td>{formatNumber(u.totalTokens || 0)}</td>
                     <td>{formatDate(u.lastLoginAt)}</td>
                     <td>

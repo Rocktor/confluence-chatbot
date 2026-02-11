@@ -23,6 +23,7 @@ logger = setup_logger("chat_service")
 class ChatService:
     def __init__(self, db: Session, user_id: int = None):
         self.db = db
+        self.user_id = user_id
         self.openai_service = AzureOpenAIService()
         self.confluence_service = self._get_user_confluence_service(user_id)
         self.tool_executor = ToolExecutor(self.confluence_service)
@@ -299,6 +300,14 @@ class ChatService:
         on_tool_result: Callable[[str, Dict], None] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream chat response with tool calling support"""
+        # Lazy reload: if confluence_service was not available at init time,
+        # try loading it now (user may have saved config after opening chat)
+        if self.confluence_service is None and self.user_id:
+            self.confluence_service = self._get_user_confluence_service(self.user_id)
+            if self.confluence_service:
+                self.tool_executor = ToolExecutor(self.confluence_service)
+                logger.info(f"Lazy-loaded Confluence service for user {self.user_id}")
+
         # Merge image_urls and file_urls for storage
         all_urls = []
         if image_urls:

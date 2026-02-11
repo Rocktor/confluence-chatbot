@@ -29,7 +29,7 @@ class UserResponse(BaseModel):
     last_login_at: Optional[datetime]
     created_at: datetime
     total_tokens: Optional[int] = 0  # 总 token 消耗
-    tokens_30d: Optional[int] = 0    # 最近30天 token 消耗
+    recent_tokens: Optional[int] = 0  # 最近7天 token 消耗
 
     class Config:
         from_attributes = True
@@ -104,7 +104,7 @@ async def get_users(
     users = query.order_by(desc(User.created_at)).offset(skip).limit(limit).all()
 
     # 获取每个用户的 token 消耗统计
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
     user_ids = [u.id for u in users]
 
     # 总消耗
@@ -114,13 +114,13 @@ async def get_users(
     ).filter(TokenUsage.user_id.in_(user_ids)).group_by(TokenUsage.user_id).all()
     total_map = {r.user_id: r.total or 0 for r in total_usage}
 
-    # 最近30天消耗
+    # 最近7天消耗
     recent_usage = db.query(
         TokenUsage.user_id,
         func.sum(TokenUsage.total_tokens).label("total")
     ).filter(
         TokenUsage.user_id.in_(user_ids),
-        TokenUsage.created_at >= thirty_days_ago
+        TokenUsage.created_at >= seven_days_ago
     ).group_by(TokenUsage.user_id).all()
     recent_map = {r.user_id: r.total or 0 for r in recent_usage}
 
@@ -136,7 +136,7 @@ async def get_users(
             "last_login_at": u.last_login_at,
             "created_at": u.created_at,
             "total_tokens": total_map.get(u.id, 0),
-            "tokens_30d": recent_map.get(u.id, 0)
+            "recent_tokens": recent_map.get(u.id, 0)
         }
         for u in users
     ]
