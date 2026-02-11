@@ -64,7 +64,11 @@ async def qrcode_callback(code: str, state: str, request: Request, db: Session =
     """Handle DingTalk QR code callback"""
     auth_service = AuthService(db)
     try:
-        ip_address = request.client.host if request.client else None
+        ip_address = (
+            request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or request.headers.get("x-real-ip")
+            or (request.client.host if request.client else None)
+        )
         user_agent = request.headers.get("user-agent")
         result = await auth_service.process_qrcode_callback(code, state, ip_address, user_agent)
         return {
