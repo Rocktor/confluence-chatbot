@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { useChatStore, useUIStore, useThemeStore, Conversation, Message } from '../store/chatStore';
+import { useChatStore, useUIStore, useThemeStore, useModelStore, Conversation, Message } from '../store/chatStore';
 import { LeftPanel } from '../components/LeftPanel';
 import { MessageList, MessageInput } from '../components/ChatArea';
 import { WriteBackDialog, SettingsDialog } from '../components/Dialogs';
+import { RightToolbar } from '../components/RightToolbar';
 import api from '../utils/api';
 import styles from './Chat.module.css';
 
@@ -38,6 +39,9 @@ const Chat: React.FC = () => {
     setIsLoading,
     setIsStreaming,
     setIsUploading,
+    setIsThinking,
+    appendThinkingBuffer,
+    clearThinkingBuffer,
     setSelectedConfluencePage,
     setCurrentToolCall,
     clearChat,
@@ -46,6 +50,7 @@ const Chat: React.FC = () => {
   } = useChatStore();
   const { isSidebarOpen, toggleSidebar } = useUIStore();
   const { theme } = useThemeStore();
+  const { currentModel } = useModelStore();
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -141,8 +146,15 @@ const Chat: React.FC = () => {
           // This keeps TypingIndicator visible until content arrives
           break;
 
-        case 'stream_chunk':
+        case 'thinking':
+          // Gemini thinking model - accumulate thinking content
+          setIsThinking(true);
+          appendThinkingBuffer(data.content);
+          break;
+
+        case 'stream_chunk': {
           // Set streaming on first chunk so TypingIndicator hides
+          setIsThinking(false);
           setIsStreaming(true);
           // 检查最后一条消息是否是可追加的 assistant 消息
           const messages = useChatStore.getState().messages;
@@ -150,17 +162,26 @@ const Chat: React.FC = () => {
           const canAppend = lastMsg?.role === 'assistant' && !lastMsg.toolCall;
 
           if (!canAppend) {
-            // 没有可追加的消息，先创建一个
-            addMessage({ role: 'assistant', content: data.content });
+            // 没有可追加的消息，先创建一个（附带思考内容）
+            const thinkingContent = useChatStore.getState().thinkingBuffer;
+            addMessage({
+              role: 'assistant',
+              content: data.content,
+              thinkingContent: thinkingContent || undefined
+            });
+            clearThinkingBuffer();
           } else {
             updateLastMessage(data.content);
           }
           break;
+        }
 
         case 'stream_end':
           setIsStreaming(false);
+          setIsThinking(false);
           setIsLoading(false);
           setCurrentToolCall(null);
+          clearThinkingBuffer();
           break;
 
         case 'tool_call':
@@ -177,6 +198,8 @@ const Chat: React.FC = () => {
           console.error('WebSocket error:', data.message);
           setIsLoading(false);
           setIsStreaming(false);
+          setIsThinking(false);
+          clearThinkingBuffer();
           break;
       }
     };
@@ -255,6 +278,8 @@ const Chat: React.FC = () => {
     };
     addMessage(userMessage);
     setIsLoading(true);
+    setIsThinking(false);
+    clearThinkingBuffer();
 
     // 3. If there are files, upload them in background
     let serverFileUrls: string[] = [];
@@ -294,12 +319,13 @@ const Chat: React.FC = () => {
       setIsUploading(false);
     }
 
-    // 4. Send to WebSocket with server URLs
+    // 4. Send to WebSocket with server URLs and model selection
     wsRef.current.send(JSON.stringify({
       conversation_id: currentConversationId,
       content,
       image_urls: serverImageUrls,
-      file_urls: serverFileUrls
+      file_urls: serverFileUrls,
+      model: currentModel
     }));
   };
 
@@ -355,6 +381,9 @@ const Chat: React.FC = () => {
           isUploading={isUploading}
         />
       </main>
+
+      {/* Right Toolbar */}
+      <RightToolbar onSendMessage={handleSendMessage} />
 
       {/* Dialogs */}
       <WriteBackDialog onWriteBack={handleWriteBack} />

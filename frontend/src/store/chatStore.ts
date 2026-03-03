@@ -9,6 +9,7 @@ export interface Message {
   imageUrl?: string;
   fileUrls?: string[];
   createdAt?: string;
+  thinkingContent?: string;  // Gemini thinking model output
   toolCall?: {
     name: string;
     displayName: string;
@@ -45,6 +46,8 @@ interface ChatState {
   isLoading: boolean;
   isStreaming: boolean;
   isUploading: boolean;
+  isThinking: boolean;
+  thinkingBuffer: string;
   selectedConfluencePage: ConfluencePage | null;
   currentToolCall: { name: string; displayName: string } | null;
 
@@ -62,6 +65,9 @@ interface ChatState {
   setIsLoading: (loading: boolean) => void;
   setIsStreaming: (streaming: boolean) => void;
   setIsUploading: (uploading: boolean) => void;
+  setIsThinking: (thinking: boolean) => void;
+  appendThinkingBuffer: (content: string) => void;
+  clearThinkingBuffer: () => void;
   setSelectedConfluencePage: (page: ConfluencePage | null) => void;
   setCurrentToolCall: (toolCall: { name: string; displayName: string } | null) => void;
   clearChat: () => void;
@@ -76,6 +82,8 @@ export const useChatStore = create<ChatState>((set) => ({
   isLoading: false,
   isStreaming: false,
   isUploading: false,
+  isThinking: false,
+  thinkingBuffer: '',
   selectedConfluencePage: null,
   currentToolCall: null,
 
@@ -157,6 +165,14 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setIsUploading: (isUploading) => set({ isUploading }),
 
+  setIsThinking: (isThinking) => set({ isThinking }),
+
+  appendThinkingBuffer: (content) => set((state) => ({
+    thinkingBuffer: state.thinkingBuffer + content
+  })),
+
+  clearThinkingBuffer: () => set({ thinkingBuffer: '' }),
+
   setSelectedConfluencePage: (page) => set({ selectedConfluencePage: page }),
 
   setCurrentToolCall: (toolCall) => set({ currentToolCall: toolCall }),
@@ -227,6 +243,36 @@ interface UIState {
   setSettingsOpen: (open: boolean) => void;
   setWritebackDialogOpen: (open: boolean) => void;
 }
+
+// Model Store
+export type ModelId = 'gpt-5.1' | 'gpt-5.2' | 'gemini-3-pro';
+
+export interface ModelOption {
+  id: ModelId;
+  name: string;
+  provider: string;
+}
+
+export const MODEL_OPTIONS: ModelOption[] = [
+  { id: 'gpt-5.1', name: 'GPT-5.1', provider: 'Azure' },
+  { id: 'gpt-5.2', name: 'GPT-5.2', provider: 'Azure' },
+  { id: 'gemini-3-pro', name: 'Gemini 3 Pro', provider: 'Google' },
+];
+
+interface ModelState {
+  currentModel: ModelId;
+  setCurrentModel: (model: ModelId) => void;
+}
+
+export const useModelStore = create<ModelState>()(
+  persist(
+    (set) => ({
+      currentModel: 'gpt-5.1' as ModelId,
+      setCurrentModel: (model) => set({ currentModel: model }),
+    }),
+    { name: 'model-storage' }
+  )
+);
 
 export const useUIStore = create<UIState>((set) => ({
   isSidebarOpen: true,

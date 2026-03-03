@@ -23,11 +23,12 @@ class AzureOpenAIService:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: int = None
+        max_tokens: int = None,
+        deployment: str = None
     ) -> AsyncGenerator[str, None]:
         """Stream chat completion responses"""
         response = await self.client.chat.completions.create(
-            model=self.chat_deployment,
+            model=deployment or self.chat_deployment,
             messages=messages,
             temperature=temperature,
             max_completion_tokens=max_tokens or self.max_completion_tokens,
@@ -48,11 +49,12 @@ class AzureOpenAIService:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: int = None
+        max_tokens: int = None,
+        deployment: str = None
     ) -> str:
         """Get chat completion response"""
         response = await self.client.chat.completions.create(
-            model=self.chat_deployment,
+            model=deployment or self.chat_deployment,
             messages=messages,
             temperature=temperature,
             max_completion_tokens=max_tokens or self.max_completion_tokens
@@ -76,11 +78,12 @@ class AzureOpenAIService:
         messages: List[Dict],
         tools: List[Dict] = None,
         tool_choice: str = "auto",
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        deployment: str = None
     ) -> Dict[str, Any]:
         """Chat completion with tool calling support (non-streaming)"""
         kwargs = {
-            "model": self.chat_deployment,
+            "model": deployment or self.chat_deployment,
             "messages": messages,
             "temperature": temperature,
             "max_completion_tokens": self.max_completion_tokens
@@ -110,11 +113,12 @@ class AzureOpenAIService:
         messages: List[Dict],
         tools: List[Dict] = None,
         tool_choice: str = "auto",
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        deployment: str = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Streaming chat completion with tool calling support"""
         kwargs = {
-            "model": self.chat_deployment,
+            "model": deployment or self.chat_deployment,
             "messages": messages,
             "temperature": temperature,
             "max_completion_tokens": self.max_completion_tokens,

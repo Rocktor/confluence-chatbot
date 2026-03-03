@@ -332,7 +332,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage, onSto
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.doc,.docx,.txt,.md"
+              accept=".pdf,.doc,.docx,.txt,.md,.xlsx,.xls"
               onChange={(e) => handleFileSelect(e.target.files)}
               style={{ display: 'none' }}
             />

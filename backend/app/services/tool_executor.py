@@ -5,6 +5,13 @@ import mimetypes
 import logging
 from typing import Dict, Any, List, Optional
 from app.services.confluence_service import ConfluenceService
+from app.services.confluence_image_service import ConfluenceImageService
+from app.services.tools import (
+    REVIEW_STANDARD, REVIEW_OUTPUT_FORMAT,
+    EXPERIMENT_REVIEW_STANDARD, EXPERIMENT_REVIEW_OUTPUT_FORMAT,
+    SLA_REVIEW_STANDARD, SLA_REVIEW_OUTPUT_FORMAT,
+    MEETING_SUBMISSION_REVIEW_STANDARD, MEETING_SUBMISSION_REVIEW_OUTPUT_FORMAT
+)
 
 logger = logging.getLogger("tool_executor")
 
@@ -14,6 +21,14 @@ class ToolExecutor:
 
     def __init__(self, confluence_service: Optional[ConfluenceService]):
         self.confluence = confluence_service
+        # Create image download service for AI vision
+        if confluence_service:
+            self.image_service = ConfluenceImageService(
+                base_url=confluence_service.base_url,
+                auth=confluence_service.auth
+            )
+        else:
+            self.image_service = None
 
     def _extract_page_id(self, page_id_or_url: str) -> str:
         """Extract page ID from URL or return as-is"""
@@ -107,8 +122,11 @@ class ToolExecutor:
 
     async def execute(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool and return result"""
-        # Check credentials for Confluence tools
-        if self.confluence is None:
+        # Check credentials for Confluence tools (review tool can work without Confluence)
+        if self.confluence is None and tool_name not in (
+            "review_meeting_material", "review_experiment_retrospective", "review_sla_contract",
+            "review_meeting_submission"
+        ):
             return {
                 "success": False,
                 "error": "您尚未配置 Confluence 凭证。请在设置中配置您的 Confluence 账号信息后再试。"
@@ -149,6 +167,18 @@ class ToolExecutor:
                 return await self._list_children(arguments)
             elif tool_name == "get_confluence_spaces":
                 return await self._get_spaces(arguments)
+            # Image viewing tool
+            elif tool_name == "view_confluence_image":
+                return await self._view_image(arguments)
+            # Review tools
+            elif tool_name == "review_meeting_material":
+                return await self._review_meeting_material(arguments)
+            elif tool_name == "review_experiment_retrospective":
+                return await self._review_experiment_retrospective(arguments)
+            elif tool_name == "review_sla_contract":
+                return await self._review_sla_contract(arguments)
+            elif tool_name == "review_meeting_submission":
+                return await self._review_meeting_submission(arguments)
             else:
                 return {"success": False, "error": f"Unknown tool: {tool_name}"}
         except Exception as e:
@@ -193,7 +223,25 @@ class ToolExecutor:
         # Add images info if present
         if images:
             result["images"] = images
-            result["image_note"] = "精确编辑时使用 edit_confluence_page，从 html 字段中找到要修改的部分"
+            result["image_note"] = "如需查看更多图片，可使用 view_confluence_image 工具"
+
+        # Auto-download attachment images for AI vision (best-effort, up to 5)
+        if images and self.image_service:
+            try:
+                downloaded = await self.image_service.download_images_batch(
+                    page_id=page["id"],
+                    images=images,
+                    max_images=5
+                )
+                if downloaded:
+                    result["_downloaded_images"] = [
+                        {"filename": img["filename"], "data_url": img["data_url"]}
+                        for img in downloaded
+                    ]
+                    result["_downloaded_filenames"] = [img["filename"] for img in downloaded]
+                    logger.info(f"Auto-downloaded {len(downloaded)}/{len(images)} images from page {page['id']}")
+            except Exception as e:
+                logger.warning(f"Failed to auto-download images for AI vision: {e}")
 
         return result
 
@@ -372,6 +420,32 @@ class ToolExecutor:
             "version": result.get("version", {}).get("number"),
             "message": "内容已精确替换",
             "url": f"{self.confluence.base_url}/pages/viewpage.action?pageId={result['id']}"
+        }
+
+    # ============ Image Viewing ============
+
+    async def _view_image(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """View a single Confluence page attachment image for AI vision"""
+        page_id = args["page_id"]
+        filename = args["filename"]
+
+        if not self.image_service:
+            return {"success": False, "error": "Confluence 未配置"}
+
+        try:
+            result = await self.image_service.download_attachment(page_id, filename)
+        except Exception as e:
+            logger.error(f"Failed to download image {filename} from page {page_id}: {e}")
+            return {"success": False, "error": f"无法下载图片: {filename} ({e})"}
+
+        if not result:
+            return {"success": False, "error": f"无法下载图片: {filename}"}
+
+        return {
+            "success": True,
+            "filename": filename,
+            "message": f"图片 {filename} 已加载，请查看。",
+            "_downloaded_images": [{"filename": filename, "data_url": result["data_url"]}]
         }
 
     # ============ Table Operations ============
@@ -561,4 +635,84 @@ class ToolExecutor:
             "success": True,
             "count": len(spaces),
             "spaces": spaces
+        }
+
+    # ============ Review Tools ============
+
+    async def _get_review_document_content(self, args: Dict[str, Any]) -> str:
+        """Extract document content for review from args (shared by all review tools)"""
+        page_id_or_url = args.get("page_id_or_url")
+        content = args.get("content")
+
+        if page_id_or_url:
+            if self.confluence is None:
+                raise ValueError("读取 Confluence 页面需要配置凭证。请在设置中配置，或直接粘贴文档内容。")
+            page_id = self._extract_page_id(page_id_or_url)
+            page = await self.confluence.get_page(page_id)
+            html_content = page.get("body", {}).get("storage", {}).get("value", "")
+            document_content = self.confluence.html_to_markdown(html_content)
+            return f"【页面标题】{page['title']}\n\n{document_content}"
+        elif content:
+            return content
+        else:
+            return "（未提供文档内容，请根据当前对话上下文中的文档内容进行审稿）"
+
+    async def _review_meeting_material(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Review meeting material against standards"""
+        try:
+            document_content = await self._get_review_document_content(args)
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+
+        return {
+            "success": True,
+            "review_standard": REVIEW_STANDARD,
+            "document_content": document_content,
+            "output_format": REVIEW_OUTPUT_FORMAT,
+            "instruction": "请严格按照上述审稿标准对文档进行审核，按照输出格式生成完整的审稿报告。注意：只评审材料质量，不评判业务方向。"
+        }
+
+    async def _review_experiment_retrospective(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Review experiment retrospective against standards"""
+        try:
+            document_content = await self._get_review_document_content(args)
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+
+        return {
+            "success": True,
+            "review_standard": EXPERIMENT_REVIEW_STANDARD,
+            "document_content": document_content,
+            "output_format": EXPERIMENT_REVIEW_OUTPUT_FORMAT,
+            "instruction": "请严格按照上述运策实验复盘审稿标准对文档进行审核，按照输出格式生成完整的审稿报告。注意：只评审复盘材料质量，不评判实验本身成败。失败的实验如果复盘写得好，同样可以高分通过。"
+        }
+
+    async def _review_sla_contract(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Review SLA contract against standards"""
+        try:
+            document_content = await self._get_review_document_content(args)
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+
+        return {
+            "success": True,
+            "review_standard": SLA_REVIEW_STANDARD,
+            "document_content": document_content,
+            "output_format": SLA_REVIEW_OUTPUT_FORMAT,
+            "instruction": "请严格按照上述SLA合同审稿标准对合同进行审核，按照输出格式生成完整的审稿报告。请先判断合同类型（人力买断/增量价值分成/计件/里程碑），再进行对应的专项检查。"
+        }
+
+    async def _review_meeting_submission(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Review meeting submission material against standards"""
+        try:
+            document_content = await self._get_review_document_content(args)
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+
+        return {
+            "success": True,
+            "review_standard": MEETING_SUBMISSION_REVIEW_STANDARD,
+            "document_content": document_content,
+            "output_format": MEETING_SUBMISSION_REVIEW_OUTPUT_FORMAT,
+            "instruction": "请严格按照上述上会材料审核规范逐项检查文档，按照输出格式生成完整的审核报告。注意：四部分结构（审核意见、待办、正文、附录）必须逐项检查；图表/颜色等需人工确认的项标注提示；CEO-1视角评估需结合材料实际内容进行深度分析。"
         }

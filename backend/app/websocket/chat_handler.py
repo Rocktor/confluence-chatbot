@@ -13,7 +13,8 @@ TOOL_DISPLAY_NAMES = {
     "insert_content_to_confluence_page": "插入内容",
     "update_confluence_page": "更新页面",
     "create_confluence_page": "创建页面",
-    "search_confluence": "搜索页面"
+    "search_confluence": "搜索页面",
+    "view_confluence_image": "查看图片"
 }
 
 class ChatWebSocketHandler:
@@ -82,6 +83,12 @@ class ChatWebSocketHandler:
                 # Get file_urls for document parsing
                 file_urls = message_data.get("file_urls", [])
 
+                # Parse model selection
+                model = message_data.get("model", "gpt-5.1")
+                ALLOWED_MODELS = {"gpt-5.1", "gpt-5.2", "gemini-3-pro"}
+                if model not in ALLOWED_MODELS:
+                    model = "gpt-5.1"
+
                 # Create conversation if not exists
                 if not conversation_id:
                     conversation = chat_service.create_conversation(user.id)
@@ -106,9 +113,14 @@ class ChatWebSocketHandler:
                 await websocket.send_json({"type": "stream_start"})
 
                 async for chunk in chat_service.chat_stream_with_tools(
-                    conversation_id, content, user.id, image_urls, file_urls
+                    conversation_id, content, user.id, image_urls, file_urls, model=model
                 ):
-                    if chunk["type"] == "content":
+                    if chunk["type"] == "thinking":
+                        await websocket.send_json({
+                            "type": "thinking",
+                            "content": chunk["content"]
+                        })
+                    elif chunk["type"] == "content":
                         await websocket.send_json({
                             "type": "stream_chunk",
                             "content": chunk["content"]

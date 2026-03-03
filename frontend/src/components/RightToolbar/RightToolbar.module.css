@@ -1,0 +1,215 @@
+.toolbar {
+  width: 48px;
+  height: 100vh;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-primary);
+  display: flex;
+  flex-direction: column;
+  transition: width var(--transition-base);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.toolbar.expanded {
+  width: 180px;
+}
+
+.toolList {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  padding-top: var(--space-md);
+}
+
+.toolBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  height: 36px;
+  padding: 0 var(--space-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-family: var(--font-body);
+  position: relative;
+}
+
+.toolBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.toolBtn:active {
+  background: var(--bg-active);
+}
+
+.toolBtn.disabled {
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.toolBtn.disabled:hover {
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.toolIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.toolLabel {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  overflow: hidden;
+}
+
+.toolbar.expanded .toolLabel {
+  opacity: 1;
+}
+
+.toggleBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-top: 1px solid var(--border-secondary);
+  transition: all var(--transition-fast);
+}
+
+.toggleBtn:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.toggleIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--transition-base);
+}
+
+.toggleIcon.rotated {
+  transform: rotate(180deg);
+}
+
+/* Tooltip for collapsed state */
+.tooltip {
+  display: none;
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.toolbar:not(.expanded) .toolBtn:hover .tooltip {
+  display: block;
+}
+
+/* Model Selector */
+.modelSelector {
+  position: relative;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border-secondary);
+  margin: var(--space-xs) 0;
+  flex-shrink: 0;
+}
+
+.modelMenu {
+  position: fixed;
+  min-width: 180px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: var(--space-xs);
+  z-index: 1100;
+}
+
+.modelMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-sm) var(--space-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+}
+
+.modelMenuItem:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.modelMenuItem.active {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.modelInfo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.modelName {
+  font-weight: 500;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+}
+
+.modelProvider {
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  line-height: 1.2;
+}
+
+.checkIcon {
+  display: flex;
+  align-items: center;
+  color: var(--color-primary, #2563eb);
+  flex-shrink: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .toolbar {
+    display: none;
+  }
+}

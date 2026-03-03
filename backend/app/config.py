@@ -13,7 +13,13 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ENDPOINT: str
     AZURE_OPENAI_API_VERSION: str = "2024-12-01-preview"
     AZURE_CHAT_DEPLOYMENT: str = "gpt-5.1"
+    AZURE_CHAT_DEPLOYMENT_52: str = "gpt-5.2"
     AZURE_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-large"
+
+    # Vertex AI (Gemini)
+    VERTEX_API_KEY: Optional[str] = None
+    VERTEX_PROJECT_NUM: str = "443250232488"
+    VERTEX_LOCATION: str = "global"
 
     # DingTalk
     DINGTALK_APP_KEY: str

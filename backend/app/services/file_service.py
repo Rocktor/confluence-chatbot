@@ -11,7 +11,10 @@ UPLOAD_DIR = Path("/app/uploads")
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 ALLOWED_DOC_TYPES = {"application/pdf", "text/plain", "text/markdown",
                      "application/msword",
-                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+                     "application/vnd.ms-excel",                                           # .xls
+                     }
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
 
@@ -23,11 +26,18 @@ MAGIC_BYTES = {
     b'GIF89a': 'image/gif',
     b'RIFF': 'image/webp',  # WebP starts with RIFF
     b'%PDF': 'application/pdf',
-    b'PK\x03\x04': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    b'PK\x03\x04': 'zip_based',  # DOCX and XLSX both start with PK (ZIP format)
+}
+
+# ZIP-based Office formats (all start with PK\x03\x04)
+ZIP_BASED_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",         # .xlsx
 }
 
 # Safe file extensions
-SAFE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.txt', '.md', '.doc', '.docx'}
+SAFE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.txt', '.md',
+                   '.doc', '.docx', '.xlsx', '.xls'}
 
 
 class FileService:
@@ -43,6 +53,9 @@ class FileService:
                     if content[8:12] == b'WEBP':
                         return claimed_type == 'image/webp'
                     return False
+                # ZIP-based formats (DOCX, XLSX) all start with PK
+                if file_type == 'zip_based':
+                    return claimed_type in ZIP_BASED_TYPES
                 return claimed_type == file_type or (
                     file_type.startswith('image/') and claimed_type.startswith('image/')
                 )

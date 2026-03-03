@@ -6,6 +6,7 @@ import base64
 import hashlib
 import httpx
 import asyncio
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote
@@ -18,7 +19,8 @@ logger = setup_logger("confluence_image_service")
 # Supported image formats
 SUPPORTED_FORMATS = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
-MAX_DIMENSION = 1024  # Max width/height for compression
+CACHE_TTL = 24 * 60 * 60  # 24 hours in seconds
+MAX_DIMENSION = 768  # Max width/height for compression (smaller = faster AI processing)
 JPEG_QUALITY = 85
 
 
@@ -49,6 +51,20 @@ class ConfluenceImageService:
             ext = '.jpg'
         return self.cache_dir / f"{page_id}_{file_hash}{ext}"
 
+    def _cleanup_expired_cache(self):
+        """Delete cached images older than CACHE_TTL"""
+        now = time.time()
+        cleaned = 0
+        try:
+            for f in self.cache_dir.iterdir():
+                if f.is_file() and (now - f.stat().st_mtime) > CACHE_TTL:
+                    f.unlink(missing_ok=True)
+                    cleaned += 1
+            if cleaned > 0:
+                logger.info(f"Cleaned up {cleaned} expired cache files")
+        except Exception as e:
+            logger.warning(f"Cache cleanup error: {e}")
+
     def _is_supported_format(self, filename: str) -> bool:
         """Check if the file format is supported"""
         ext = Path(filename).suffix.lower()
@@ -72,10 +88,15 @@ class ConfluenceImageService:
 
         cache_path = self._get_cache_path(page_id, filename)
 
-        # Check cache first
+        # Check cache with TTL
         if cache_path.exists():
-            logger.info(f"Cache hit: {filename}")
-            return await self._process_cached_image(cache_path, filename)
+            file_age = time.time() - cache_path.stat().st_mtime
+            if file_age < CACHE_TTL:
+                logger.info(f"Cache hit: {filename}")
+                return await self._process_cached_image(cache_path, filename)
+            else:
+                logger.info(f"Cache expired: {filename}")
+                cache_path.unlink(missing_ok=True)
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -254,6 +275,9 @@ class ConfluenceImageService:
         Returns:
             List of successfully downloaded image info dicts
         """
+        # Clean up expired cache files first
+        self._cleanup_expired_cache()
+
         results = []
 
         # Filter to attachment images only and limit count
@@ -288,10 +312,15 @@ class ConfluenceImageService:
                 ext = '.jpg'
             cache_path = self.cache_dir / f"external_{url_hash}{ext}"
 
-            # Check cache
+            # Check cache with TTL
             if cache_path.exists():
-                logger.info(f"Cache hit for external: {url}")
-                return await self._process_cached_image(cache_path, Path(url).name)
+                file_age = time.time() - cache_path.stat().st_mtime
+                if file_age < CACHE_TTL:
+                    logger.info(f"Cache hit for external: {url}")
+                    return await self._process_cached_image(cache_path, Path(url).name)
+                else:
+                    logger.info(f"Cache expired for external: {url}")
+                    cache_path.unlink(missing_ok=True)
 
             # Download using httpx
             async with httpx.AsyncClient(timeout=30.0) as client:

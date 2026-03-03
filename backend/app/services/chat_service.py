@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.orm import Conversation, Message, User, TokenUsage, ConfluenceConfig
+from app.config import settings
 from app.services.azure_openai_service import AzureOpenAIService
 from app.services.confluence_service import ConfluenceService
 from app.services.tool_executor import ToolExecutor
@@ -25,8 +26,18 @@ class ChatService:
         self.db = db
         self.user_id = user_id
         self.openai_service = AzureOpenAIService()
+        self._gemini_service = None  # Lazy init
         self.confluence_service = self._get_user_confluence_service(user_id)
         self.tool_executor = ToolExecutor(self.confluence_service)
+
+    @property
+    def gemini_service(self):
+        if self._gemini_service is None:
+            if not settings.VERTEX_API_KEY:
+                raise ValueError("Vertex AI API Key 未配置，无法使用 Gemini 模型")
+            from app.services.gemini_service import GeminiService
+            self._gemini_service = GeminiService()
+        return self._gemini_service
 
     def _get_user_confluence_service(self, user_id: int) -> Optional[ConfluenceService]:
         """Get Confluence service with user's credentials"""
@@ -296,6 +307,7 @@ class ChatService:
         user_id: int = None,
         image_urls: List[str] = None,
         file_urls: List[str] = None,
+        model: str = "gpt-5.1",
         on_tool_call: Callable[[str, str], None] = None,
         on_tool_result: Callable[[str, Dict], None] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -334,22 +346,44 @@ class ChatService:
         while iteration < max_iterations:
             iteration += 1
             full_content = ""
+            content_buffer = []
             tool_calls = []
+            raw_model_content = None  # For Gemini thought_signature preservation
 
-            # Stream response
-            async for chunk in self.openai_service.chat_completion_with_tools_stream(
-                message_history, tools=CONFLUENCE_TOOLS
-            ):
-                if chunk["type"] == "content":
+            # Stream response - route to appropriate service
+            if model == "gemini-3-pro":
+                stream = self.gemini_service.chat_completion_with_tools_stream(
+                    message_history, tools=CONFLUENCE_TOOLS
+                )
+            else:
+                deployment = settings.AZURE_CHAT_DEPLOYMENT_52 if model == "gpt-5.2" else None
+                stream = self.openai_service.chat_completion_with_tools_stream(
+                    message_history, tools=CONFLUENCE_TOOLS, deployment=deployment
+                )
+            async for chunk in stream:
+                if chunk["type"] == "thinking":
+                    yield {"type": "thinking", "content": chunk["content"]}
+                elif chunk["type"] == "content":
                     full_content += chunk["content"]
-                    yield {"type": "content", "content": chunk["content"]}
+                    content_buffer.append(chunk["content"])
+                    # Buffer content - don't yield yet; decide after stream ends
                 elif chunk["type"] == "tool_calls":
                     tool_calls = chunk["tool_calls"]
+                    raw_model_content = chunk.get("_raw_model_content")
                 elif chunk["type"] == "usage":
                     total_prompt_tokens += chunk.get("prompt_tokens", 0)
                     total_completion_tokens += chunk.get("completion_tokens", 0)
                 elif chunk["type"] == "finish":
                     pass
+
+            # Route buffered content:
+            # - If tool_calls follow → content is intermediate reasoning, redirect to thinking
+            # - If no tool_calls → content is the final answer, flush as content
+            if tool_calls and full_content.strip():
+                yield {"type": "thinking", "content": full_content}
+            else:
+                for c in content_buffer:
+                    yield {"type": "content", "content": c}
 
             # If no tool calls, we're done
             if not tool_calls:
@@ -363,7 +397,11 @@ class ChatService:
                     })
                     # Get a non-streaming response
                     try:
-                        forced_response = await self.openai_service.chat_completion(message_history, max_tokens=1000)
+                        if model == "gemini-3-pro":
+                            forced_response = await self.gemini_service.chat_completion(message_history, max_tokens=1000)
+                        else:
+                            deployment = settings.AZURE_CHAT_DEPLOYMENT_52 if model == "gpt-5.2" else None
+                            forced_response = await self.openai_service.chat_completion(message_history, max_tokens=1000, deployment=deployment)
                         if forced_response and forced_response.strip():
                             yield {"type": "content", "content": forced_response}
                             self.add_message(conversation_id, "assistant", forced_response)
@@ -379,7 +417,7 @@ class ChatService:
                 break
 
             # Add assistant message with tool calls to history
-            message_history.append({
+            assistant_msg = {
                 "role": "assistant",
                 "content": full_content or None,
                 "tool_calls": [
@@ -390,7 +428,11 @@ class ChatService:
                     }
                     for tc in tool_calls
                 ]
-            })
+            }
+            # Preserve raw Gemini Content for thought_signature (thinking model)
+            if raw_model_content is not None:
+                assistant_msg["_gemini_content"] = raw_model_content
+            message_history.append(assistant_msg)
 
             # Execute tool calls
             for tc in tool_calls:
@@ -423,6 +465,12 @@ class ChatService:
 
                 # Execute tool
                 result = await self.tool_executor.execute(tool_name, arguments)
+
+                # Extract downloaded images before JSON serialization (pop internal field)
+                downloaded_images = None
+                if isinstance(result, dict):
+                    downloaded_images = result.pop("_downloaded_images", None)
+
                 if result.get('success'):
                     logger.info(f"Tool result: {tool_name}, success: True")
                 else:
@@ -441,8 +489,28 @@ class ChatService:
                     "content": json.dumps(result, ensure_ascii=False)
                 })
 
+                # Inject downloaded images as a synthetic user message for AI vision
+                if downloaded_images:
+                    filenames = ", ".join(img["filename"] for img in downloaded_images)
+                    content_parts = [
+                        {
+                            "type": "text",
+                            "text": f"[系统：以下是从 Confluence 页面提取的 {len(downloaded_images)} 张图片（{filenames}），请结合图片内容回答用户问题]"
+                        }
+                    ]
+                    for img in downloaded_images:
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": img["data_url"], "detail": "auto"}
+                        })
+                    message_history.append({
+                        "role": "user",
+                        "content": content_parts
+                    })
+                    logger.info(f"Injected {len(downloaded_images)} images into message history for AI vision")
+
         # Record token usage if user_id provided
         if user_id and (total_prompt_tokens > 0 or total_completion_tokens > 0):
-            self.record_token_usage(user_id, conversation_id, total_prompt_tokens, total_completion_tokens)
+            self.record_token_usage(user_id, conversation_id, total_prompt_tokens, total_completion_tokens, model=model)
 
         yield {"type": "done"}

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChatStore, Message } from '../../store/chatStore';
@@ -35,7 +35,41 @@ const Icons = {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.spinner}>
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
     </svg>
+  ),
+  ChevronDown: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  ),
+  Brain: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M9.5 2A5.5 5.5 0 0 0 4 7.5c0 1.58.67 3 1.74 4.01A5.5 5.5 0 0 0 4 15.5 5.5 5.5 0 0 0 9.5 21h0a1 1 0 0 0 1-1v-7" />
+      <path d="M14.5 2A5.5 5.5 0 0 1 20 7.5c0 1.58-.67 3-1.74 4.01A5.5 5.5 0 0 1 20 15.5a5.5 5.5 0 0 1-5.5 5.5h0a1 1 0 0 1-1-1v-7" />
+    </svg>
   )
+};
+
+// Collapsible thinking block
+const ThinkingBlock: React.FC<{ content: string }> = ({ content }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  return (
+    <div className={styles.thinkingBlock}>
+      <button
+        className={`${styles.thinkingToggle} ${isExpanded ? styles.expanded : ''}`}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <Icons.Brain />
+        <span>已深度思考</span>
+        <Icons.ChevronDown />
+      </button>
+      {isExpanded && (
+        <div className={styles.thinkingContent}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
 };
 
 interface MessageItemProps {
@@ -186,6 +220,11 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
               </div>
             )}
 
+            {/* Thinking block (collapsible) */}
+            {!isUser && message.thinkingContent && (
+              <ThinkingBlock content={message.thinkingContent} />
+            )}
+
             {/* Text content */}
             <div className={`markdown-content ${styles.textContent}`}>
               <ReactMarkdown
@@ -214,7 +253,13 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
 
 // Typing indicator with status text
 const TypingIndicator: React.FC = () => {
-  const { isUploading } = useChatStore();
+  const { isUploading, isThinking } = useChatStore();
+
+  const statusText = isUploading
+    ? '正在上传附件'
+    : isThinking
+      ? '深度思考中'
+      : 'AI 正在思考';
 
   return (
     <div className={`${styles.messageWrapper} ${styles.assistant}`}>
@@ -227,10 +272,9 @@ const TypingIndicator: React.FC = () => {
             <span className={styles.roleName}>AI 助手</span>
           </div>
           <div className={`${styles.messageBubble} ${styles.aiBubble}`}>
-            <div className={styles.typingIndicator}>
-              <span className={styles.statusText}>
-                {isUploading ? '正在上传附件' : 'AI 正在思考'}
-              </span>
+            <div className={`${styles.typingIndicator} ${isThinking ? styles.thinkingMode : ''}`}>
+              {isThinking && <Icons.Brain />}
+              <span className={styles.statusText}>{statusText}</span>
               <span className={styles.dot}></span>
               <span className={styles.dot}></span>
               <span className={styles.dot}></span>
@@ -243,7 +287,7 @@ const TypingIndicator: React.FC = () => {
 };
 
 export const MessageList: React.FC = () => {
-  const { messages, isLoading, isStreaming } = useChatStore();
+  const { messages, isLoading, isStreaming, isThinking } = useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevMessageCount = useRef(messages.length);
 
@@ -272,7 +316,7 @@ export const MessageList: React.FC = () => {
       {messages.map((msg, idx) => (
         <MessageItem key={msg.id || `fallback-${idx}`} message={msg} />
       ))}
-      {isLoading && !isStreaming && <TypingIndicator />}
+      {(isLoading && !isStreaming) || isThinking ? <TypingIndicator /> : null}
       <div ref={messagesEndRef} />
     </div>
   );

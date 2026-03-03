@@ -56,6 +56,10 @@ services:
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - CORS_ORIGINS=${CORS_ORIGINS:-https://cf.rocktor.shop}
       - CONFLUENCE_BASE_URL=${CONFLUENCE_BASE_URL}
+      - AZURE_CHAT_DEPLOYMENT_52=${AZURE_CHAT_DEPLOYMENT_52:-gpt-5.2}
+      - VERTEX_API_KEY=${VERTEX_API_KEY:-}
+      - VERTEX_PROJECT_NUM=${VERTEX_PROJECT_NUM:-443250232488}
+      - VERTEX_LOCATION=${VERTEX_LOCATION:-global}
     volumes:
       - ./backend:/app
     ports:

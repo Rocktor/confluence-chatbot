@@ -370,6 +370,7 @@ class ConfluenceService:
                     lang_param = f'<ac:parameter ac:name="language">{code_lang}</ac:parameter>' if code_lang else ''
                     html_lines.append(f'<ac:structured-macro ac:name="code">{lang_param}<ac:plain-text-body><![CDATA[{content}]]></ac:plain-text-body></ac:structured-macro>')
                     code_lang = ''
+                    prev_was_block = True
                 continue
 
             if in_code_block:
@@ -404,6 +405,7 @@ class ConfluenceService:
             elif in_table:
                 in_table = False
                 html_lines.append('</tbody></table>')
+                prev_was_block = True
 
             # Escape and process inline formats
             escaped_line = html.escape(line)
@@ -411,11 +413,10 @@ class ConfluenceService:
 
             # Block elements
             if not escaped_line.strip():
-                # Skip empty lines after block elements (headings, lists, tables)
-                # Only add paragraph break between text paragraphs
-                if not prev_was_block and html_lines and not html_lines[-1].startswith('<p></p>'):
-                    html_lines.append('<p></p>')
-                prev_was_block = False
+                prev_was_block = True
+            elif stripped == '---' or stripped == '***' or stripped == '___':
+                html_lines.append('<hr/>')
+                prev_was_block = True
             elif escaped_line.startswith('# '):
                 html_lines.append(f'<h1>{escaped_line[2:]}</h1>')
                 prev_was_block = True

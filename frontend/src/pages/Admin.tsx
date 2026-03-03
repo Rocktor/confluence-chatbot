@@ -91,8 +91,9 @@ const Admin: React.FC = () => {
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
-    // 转换为北京时间 (UTC+8)
-    return new Date(dateStr).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+    // 后端返回 UTC 时间但无 Z 后缀，需手动补上才能正确解析
+    const utcStr = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z';
+    return new Date(utcStr).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   };
 
   const formatNumber = (num: number) => {

@@ -1,6 +1,6 @@
 """
 Document Parser Service
-Parse .md, .txt, .pdf, .doc/.docx files with Chinese support
+Parse .md, .txt, .pdf, .doc/.docx, .xlsx/.xls files with Chinese support
 """
 import os
 from pathlib import Path
@@ -13,7 +13,7 @@ logger = setup_logger("document_parser")
 MAX_DOCUMENT_CHARS = 50000
 
 # Supported document extensions
-DOCUMENT_EXTENSIONS = {'.md', '.txt', '.pdf', '.doc', '.docx'}
+DOCUMENT_EXTENSIONS = {'.md', '.txt', '.pdf', '.doc', '.docx', '.xlsx', '.xls'}
 
 
 class DocumentParserService:
@@ -49,6 +49,8 @@ class DocumentParserService:
                 content = self._parse_pdf(file_path)
             elif ext in {'.doc', '.docx'}:
                 content = self._parse_word(file_path)
+            elif ext in {'.xlsx', '.xls'}:
+                content = self._parse_excel(file_path)
             else:
                 logger.warning(f"Unsupported file type: {ext}")
                 return None
@@ -182,6 +184,41 @@ class DocumentParserService:
             return None
         except Exception as e:
             logger.error(f"Failed to parse Word document {file_path}: {e}")
+            return None
+
+    def _parse_excel(self, file_path: str) -> Optional[str]:
+        """
+        Parse Excel file (.xlsx/.xls) using openpyxl
+        Supports Chinese content in cells
+        Note: .xls (old format) is not supported by openpyxl, user should save as .xlsx
+        """
+        ext = Path(file_path).suffix.lower()
+        if ext == '.xls':
+            return "[不支持旧版 .xls 格式，请在 Excel 中另存为 .xlsx 格式后重新上传]"
+
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            text_parts = []
+
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                rows_text = []
+                for row in ws.iter_rows(values_only=True):
+                    if any(cell is not None for cell in row):
+                        row_text = " | ".join(str(c) if c is not None else "" for c in row)
+                        rows_text.append(row_text)
+                if rows_text:
+                    text_parts.append(f"[工作表: {sheet_name}]\n" + "\n".join(rows_text))
+
+            wb.close()
+            return "\n\n".join(text_parts) if text_parts else None
+
+        except ImportError:
+            logger.error("openpyxl not installed. Install with: pip install openpyxl")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to parse Excel {file_path}: {e}")
             return None
 
 
