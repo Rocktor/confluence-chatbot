@@ -28,6 +28,7 @@ class User(Base):
     files = relationship("UserFile", back_populates="user")
     token_usages = relationship("TokenUsage", back_populates="user")
     login_logs = relationship("LoginLog", back_populates="user")
+    access_logs = relationship("AccessLog", back_populates="user")
 
 class QRCodeSession(Base):
     __tablename__ = "qrcode_sessions"
@@ -168,6 +169,19 @@ class LoginLog(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     user = relationship("User", back_populates="login_logs")
+
+
+class AccessLog(Base):
+    __tablename__ = "access_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    access_type = Column(String(50), default="ws_session")
+    ip_address = Column(String(50))
+    user_agent = Column(Text)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    user = relationship("User", back_populates="access_logs")
 
 
 class SystemLog(Base):

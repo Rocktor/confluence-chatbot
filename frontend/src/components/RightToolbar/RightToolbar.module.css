@@ -207,6 +207,223 @@
   flex-shrink: 0;
 }
 
+/* Tool button wrapper for edit icon overlay */
+.toolBtnWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.toolBtnWrapper .toolBtn {
+  flex: 1;
+}
+
+.editBtn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+  opacity: 0;
+}
+
+.toolBtnWrapper:hover .editBtn {
+  display: flex;
+  opacity: 1;
+}
+
+.editBtn:hover {
+  color: var(--accent-primary, #2563eb);
+  background: var(--bg-active);
+}
+
+.customDot {
+  position: absolute;
+  top: 6px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-primary, #2563eb);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.toolBtnWrapper:hover .customDot {
+  display: none;
+}
+
+/* Prompt Edit Dialog */
+.promptOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.promptDialog {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
+  width: 90%;
+  max-width: 480px;
+  animation: slideInUp 0.2s ease-out;
+}
+
+.promptHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg, 20px);
+  border-bottom: 1px solid var(--border-secondary);
+}
+
+.promptHeader h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.promptCloseBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.promptCloseBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.promptBody {
+  padding: var(--space-md) var(--space-lg, 20px);
+}
+
+.promptHint {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-sm);
+  line-height: 1.5;
+}
+
+.promptTextarea {
+  width: 100%;
+  min-height: 160px;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.promptTextarea:focus {
+  border-color: var(--color-primary, #2563eb);
+}
+
+.promptFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg, 20px);
+  border-top: 1px solid var(--border-secondary);
+}
+
+.promptFooterRight {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.promptResetBtn {
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-family: var(--font-body);
+  transition: all var(--transition-fast);
+}
+
+.promptResetBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.promptCancelBtn {
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-family: var(--font-body);
+  transition: all var(--transition-fast);
+}
+
+.promptCancelBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.promptSaveBtn {
+  padding: var(--space-xs) var(--space-md);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-primary, #2563eb);
+  color: white;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-family: var(--font-body);
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.promptSaveBtn:hover {
+  opacity: 0.9;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInUp {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .toolbar {

@@ -282,3 +282,47 @@ export const useUIStore = create<UIState>((set) => ({
   setSettingsOpen: (open) => set({ isSettingsOpen: open }),
   setWritebackDialogOpen: (open) => set({ isWritebackDialogOpen: open })
 }));
+
+// Review Prompt Store
+export type ReviewToolId = 'review' | 'experiment-review' | 'sla-review' | 'meeting-submission-review';
+
+export const DEFAULT_REVIEW_PROMPTS: Record<ReviewToolId, { empty: string; review: string }> = {
+  'review': {
+    empty: '请帮我审核会议材料。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审阅的文档内容）',
+    review: '请根据营销服会议材料审稿标准，对上面讨论的文档内容进行完整审稿评分。',
+  },
+  'experiment-review': {
+    empty: '请帮我审核实验复盘文档。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审阅的实验复盘内容）',
+    review: '请根据运策实验复盘审稿标准，对上面讨论的文档内容进行完整审稿评分。',
+  },
+  'sla-review': {
+    empty: '请帮我审核SLA合同。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审阅的SLA合同内容）',
+    review: '请根据SLA合同审稿标准，对上面讨论的合同内容进行完整审稿评分。',
+  },
+  'meeting-submission-review': {
+    empty: '请帮我审核营销服会材料。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审核的议题材料内容）',
+    review: '请根据营销服会材料审核规范（Gate+Score模式），对上面的议题材料进行完整的10分制结构化评分审核。底线层4项逐项检查，上限层4项评级，结合CEO判定模式预判风险，给出三态结论和具体修改建议。',
+  },
+};
+
+interface ReviewPromptState {
+  customPrompts: Partial<Record<ReviewToolId, string>>;
+  setCustomPrompt: (toolId: ReviewToolId, prompt: string) => void;
+  resetPrompt: (toolId: ReviewToolId) => void;
+}
+
+export const useReviewPromptStore = create<ReviewPromptState>()(
+  persist(
+    (set) => ({
+      customPrompts: {},
+      setCustomPrompt: (toolId, prompt) => set((state) => ({
+        customPrompts: { ...state.customPrompts, [toolId]: prompt }
+      })),
+      resetPrompt: (toolId) => set((state) => {
+        const { [toolId]: _, ...rest } = state.customPrompts;
+        return { customPrompts: rest };
+      }),
+    }),
+    { name: 'review-prompt-storage' }
+  )
+);

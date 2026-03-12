@@ -24,6 +24,7 @@ interface User {
   createdAt: string;
   totalTokens: number;
   recentTokens: number;
+  monthlyTokens: number;
 }
 
 interface TokenUsage {
@@ -41,13 +42,14 @@ interface TopUser {
 const Admin: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'tokens' | 'logs'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'tokens' | 'logs' | 'access-logs'>('overview');
   const [stats, setStats] = useState<Stats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage[]>([]);
   const [topUsers, setTopUsers] = useState<TopUser[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [loginLogs, setLoginLogs] = useState<any[]>([]);
+  const [accessLogs, setAccessLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -62,17 +64,19 @@ const Admin: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [statsRes, usersRes, tokenRes, logsRes] = await Promise.all([
+      const [statsRes, usersRes, tokenRes, logsRes, accessLogsRes] = await Promise.all([
         api.get('/api/admin/stats'),
         api.get('/api/admin/users'),
         api.get('/api/admin/token-usage'),
-        api.get('/api/admin/login-logs')
+        api.get('/api/admin/login-logs'),
+        api.get('/api/admin/access-logs?limit=100')
       ]);
       setStats(statsRes.data);
       setUsers(usersRes.data);
       setTokenUsage(tokenRes.data.dailyUsage);
       setTopUsers(tokenRes.data.topUsers || []);
       setLoginLogs(logsRes.data);
+      setAccessLogs(accessLogsRes.data);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load data');
     } finally {
@@ -158,6 +162,12 @@ const Admin: React.FC = () => {
         >
           登录日志
         </button>
+        <button
+          className={`${styles.tab} ${activeTab === 'access-logs' ? styles.active : ''}`}
+          onClick={() => setActiveTab('access-logs')}
+        >
+          访问日志
+        </button>
       </nav>
 
       <main className={styles.content}>
@@ -203,6 +213,7 @@ const Admin: React.FC = () => {
                   <th>角色</th>
                   <th>状态</th>
                   <th>7天Token</th>
+                  <th>30天Token</th>
                   <th>总Token</th>
                   <th>最后登录</th>
                   <th>操作</th>
@@ -225,6 +236,7 @@ const Admin: React.FC = () => {
                       </span>
                     </td>
                     <td>{formatNumber(u.recentTokens || 0)}</td>
+                    <td>{formatNumber(u.monthlyTokens || 0)}</td>
                     <td>{formatNumber(u.totalTokens || 0)}</td>
                     <td>{formatDate(u.lastLoginAt)}</td>
                     <td>
@@ -337,6 +349,34 @@ const Admin: React.FC = () => {
                     <td>{formatDate(log.createdAt)}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {activeTab === 'access-logs' && (
+          <div className={styles.logs}>
+            <h3>访问日志（WebSocket 会话）</h3>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>用户</th>
+                  <th>IP 地址</th>
+                  <th>设备</th>
+                  <th>时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accessLogs.map((log, idx) => (
+                  <tr key={idx}>
+                    <td>{log.userName || '-'}</td>
+                    <td>{log.ipAddress || '-'}</td>
+                    <td title={log.userAgent || ''}>{log.userAgent ? log.userAgent.substring(0, 60) + (log.userAgent.length > 60 ? '...' : '') : '-'}</td>
+                    <td>{formatDate(log.createdAt)}</td>
+                  </tr>
+                ))}
+                {accessLogs.length === 0 && (
+                  <tr><td colSpan={4} style={{textAlign: 'center'}}>暂无数据</td></tr>
+                )}
               </tbody>
             </table>
           </div>

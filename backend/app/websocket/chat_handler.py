@@ -1,10 +1,10 @@
 from fastapi import WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, SessionLocal
 from app.services.chat_service import ChatService
 from jose import jwt, JWTError
 from app.config import settings
-from app.models.orm import User
+from app.models.orm import User, AccessLog
 import json
 
 TOOL_DISPLAY_NAMES = {
@@ -50,6 +50,25 @@ class ChatWebSocketHandler:
             if not user:
                 await websocket.close(code=1008, reason="User not found")
                 return None
+
+            ip_address = (
+                websocket.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                or websocket.headers.get("x-real-ip")
+                or (websocket.client.host if websocket.client else None)
+            )
+            user_agent = websocket.headers.get("user-agent")
+            log_db = SessionLocal()
+            try:
+                log = AccessLog(
+                    user_id=user.id,
+                    access_type="ws_session",
+                    ip_address=ip_address,
+                    user_agent=user_agent
+                )
+                log_db.add(log)
+                log_db.commit()
+            finally:
+                log_db.close()
 
             return user
         except JWTError:

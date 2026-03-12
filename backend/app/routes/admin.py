@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from app.dependencies.database import get_db
 from app.middleware.jwt_auth import get_current_user
-from app.models.orm import User, TokenUsage, LoginLog, SystemLog, Conversation, Message
+from app.models.orm import User, TokenUsage, LoginLog, SystemLog, Conversation, Message, AccessLog
 from typing import List, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel
@@ -124,6 +124,17 @@ async def get_users(
     ).group_by(TokenUsage.user_id).all()
     recent_map = {r.user_id: r.total or 0 for r in recent_usage}
 
+    # 最近30天消耗（与 Token tab Top10 口径一致）
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    monthly_usage = db.query(
+        TokenUsage.user_id,
+        func.sum(TokenUsage.total_tokens).label("total")
+    ).filter(
+        TokenUsage.user_id.in_(user_ids),
+        TokenUsage.created_at >= thirty_days_ago
+    ).group_by(TokenUsage.user_id).all()
+    monthly_map = {r.user_id: r.total or 0 for r in monthly_usage}
+
     return [
         {
             "id": u.id,
@@ -136,7 +147,8 @@ async def get_users(
             "last_login_at": u.last_login_at,
             "created_at": u.created_at,
             "total_tokens": total_map.get(u.id, 0),
-            "recent_tokens": recent_map.get(u.id, 0)
+            "recent_tokens": recent_map.get(u.id, 0),
+            "monthly_tokens": monthly_map.get(u.id, 0)
         }
         for u in users
     ]
@@ -211,8 +223,10 @@ async def get_token_usage(
     """Get token usage statistics"""
     start_date = datetime.utcnow() - timedelta(days=days)
 
+    shanghai_date = func.date(func.timezone('Asia/Shanghai', TokenUsage.created_at))
+
     query = db.query(
-        func.date(TokenUsage.created_at).label("date"),
+        shanghai_date.label("date"),
         func.sum(TokenUsage.prompt_tokens).label("prompt_tokens"),
         func.sum(TokenUsage.completion_tokens).label("completion_tokens"),
         func.sum(TokenUsage.total_tokens).label("total_tokens"),
@@ -222,7 +236,7 @@ async def get_token_usage(
     if user_id:
         query = query.filter(TokenUsage.user_id == user_id)
 
-    daily_usage = query.group_by(func.date(TokenUsage.created_at)).order_by("date").all()
+    daily_usage = query.group_by(shanghai_date).order_by("date").all()
 
     # Get top users by token usage
     top_users = db.query(
@@ -278,6 +292,33 @@ async def get_login_logs(
             "ip_address": log.ip_address,
             "user_agent": log.user_agent,
             "created_at": log.created_at.isoformat() if log.created_at else None
+        }
+        for log in logs
+    ]
+
+
+@router.get("/access-logs")
+async def get_access_logs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    user_id: Optional[int] = None,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Get access logs (WebSocket session records)"""
+    query = db.query(AccessLog).outerjoin(User, AccessLog.user_id == User.id)
+    if user_id:
+        query = query.filter(AccessLog.user_id == user_id)
+    logs = query.order_by(desc(AccessLog.created_at)).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": log.id,
+            "user_id": log.user_id,
+            "user_name": log.user.name if log.user else None,
+            "access_type": log.access_type,
+            "ip_address": log.ip_address,
+            "user_agent": log.user_agent,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
         }
         for log in logs
     ]

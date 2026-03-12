@@ -714,5 +714,5 @@ class ToolExecutor:
             "review_standard": MEETING_SUBMISSION_REVIEW_STANDARD,
             "document_content": document_content,
             "output_format": MEETING_SUBMISSION_REVIEW_OUTPUT_FORMAT,
-            "instruction": "请严格按照上述上会材料审核规范逐项检查文档，按照输出格式生成完整的审核报告。注意：四部分结构（审核意见、待办、正文、附录）必须逐项检查；图表/颜色等需人工确认的项标注提示；CEO-1视角评估需结合材料实际内容进行深度分析。"
+            "instruction": "请严格按照 Gate+Score 审核规范逐项检查文档，按照输出格式生成完整的10分制审核报告。审核流程：1）先完成底线层4项检查（三层结构、复盘三要素、计划格式、指标口径），任一不过即判定不通过；2）底线层全部通过后进入上限层4项评级；3）结合CEO判定模式（19条驳回触发器+12条通过信号）进行风险预判；4）给出三态结论（通过/条件通过/不通过）+ 质量等级 + 评分明细 + 具体修改建议。"
         }

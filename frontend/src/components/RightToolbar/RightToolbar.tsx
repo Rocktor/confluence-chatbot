@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { useChatStore, useModelStore, MODEL_OPTIONS } from '../../store/chatStore';
+import { useChatStore, useModelStore, MODEL_OPTIONS, useReviewPromptStore, DEFAULT_REVIEW_PROMPTS, ReviewToolId } from '../../store/chatStore';
 import styles from './RightToolbar.module.css';
 
 interface RightToolbarProps {
@@ -69,14 +69,35 @@ const Icons = {
       <path d="M9 15l2 2 4-4" />
     </svg>
   ),
+  Pencil: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
+  ),
+  X: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  ),
+};
+
+const TOOL_LABELS: Record<ReviewToolId, string> = {
+  'review': '审稿',
+  'experiment-review': '复盘审稿',
+  'sla-review': 'SLA审稿',
+  'meeting-submission-review': '婷简单',
 };
 
 export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => {
   const [expanded, setExpanded] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
+  const [editingToolId, setEditingToolId] = useState<ReviewToolId | null>(null);
+  const [editValue, setEditValue] = useState('');
   const { messages, isLoading } = useChatStore();
   const { currentModel, setCurrentModel } = useModelStore();
+  const { customPrompts, setCustomPrompt, resetPrompt } = useReviewPromptStore();
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
 
@@ -107,55 +128,59 @@ export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => 
     setModelMenuOpen(prev => !prev);
   }, [modelMenuOpen]);
 
-  const handleReview = () => {
+  const handleToolClick = useCallback((toolId: ReviewToolId) => {
     if (isLoading) return;
 
+    const defaults = DEFAULT_REVIEW_PROMPTS[toolId];
     if (messages.length === 0) {
-      onSendMessage("请帮我审核会议材料。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审阅的文档内容）");
+      // Empty conversation always uses default prompt
+      onSendMessage(defaults.empty);
     } else {
-      onSendMessage("请根据营销服会议材料审稿标准，对上面讨论的文档内容进行完整审稿评分。");
+      // Use custom prompt if set, otherwise default
+      const prompt = customPrompts[toolId] ?? defaults.review;
+      onSendMessage(prompt);
     }
-  };
+  }, [isLoading, messages.length, customPrompts, onSendMessage]);
 
-  const handleExperimentReview = () => {
-    if (isLoading) return;
+  const openEditDialog = useCallback((toolId: ReviewToolId) => {
+    const current = customPrompts[toolId] ?? DEFAULT_REVIEW_PROMPTS[toolId].review;
+    setEditValue(current);
+    setEditingToolId(toolId);
+  }, [customPrompts]);
 
-    if (messages.length === 0) {
-      onSendMessage("请帮我审核实验复盘文档。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审阅的实验复盘内容）");
-    } else {
-      onSendMessage("请根据运策实验复盘审稿标准，对上面讨论的文档内容进行完整审稿评分。");
+  const handleSave = useCallback(() => {
+    if (!editingToolId) return;
+    const trimmed = editValue.trim();
+    if (trimmed === DEFAULT_REVIEW_PROMPTS[editingToolId].review) {
+      // Same as default, clear custom
+      resetPrompt(editingToolId);
+    } else if (trimmed) {
+      setCustomPrompt(editingToolId, trimmed);
     }
-  };
+    setEditingToolId(null);
+  }, [editingToolId, editValue, setCustomPrompt, resetPrompt]);
 
-  const handleSlaReview = () => {
-    if (isLoading) return;
-
-    if (messages.length === 0) {
-      onSendMessage("请帮我审核SLA合同。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审阅的SLA合同内容）");
-    } else {
-      onSendMessage("请根据SLA合同审稿标准，对上面讨论的合同内容进行完整审稿评分。");
-    }
-  };
-
-  const handleMeetingSubmissionReview = () => {
-    if (isLoading) return;
-
-    if (messages.length === 0) {
-      onSendMessage("请帮我审核上会材料。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审阅的上会材料内容）");
-    } else {
-      onSendMessage("请根据营销服会上会材料审核规范，对上面讨论的材料进行完整结构化审核。");
-    }
-  };
+  const handleReset = useCallback(() => {
+    if (!editingToolId) return;
+    setEditValue(DEFAULT_REVIEW_PROMPTS[editingToolId].review);
+  }, [editingToolId]);
 
   const currentModelOption = MODEL_OPTIONS.find(m => m.id === currentModel) || MODEL_OPTIONS[0];
 
-  const tools = [
-    { id: 'review', label: '审稿', icon: <Icons.Review />, onClick: handleReview, disabled: false },
-    { id: 'experiment-review', label: '复盘审稿', icon: <Icons.ExperimentReview />, onClick: handleExperimentReview, disabled: false },
-    { id: 'sla-review', label: 'SLA审稿', icon: <Icons.ContractReview />, onClick: handleSlaReview, disabled: false },
-    { id: 'meeting-submission-review', label: '婷简单', icon: <Icons.MeetingReview />, onClick: handleMeetingSubmissionReview, disabled: false },
-    { id: 'export', label: '导出', icon: <Icons.Export />, onClick: () => {}, disabled: true, tooltip: '即将推出' },
-    { id: 'summary', label: '摘要', icon: <Icons.Summary />, onClick: () => {}, disabled: true, tooltip: '即将推出' },
+  const tools: Array<{
+    id: string;
+    label: string;
+    icon: React.ReactNode;
+    disabled: boolean;
+    tooltip?: string;
+    editable?: boolean;
+  }> = [
+    { id: 'review', label: '审稿', icon: <Icons.Review />, disabled: false, editable: true },
+    { id: 'experiment-review', label: '复盘审稿', icon: <Icons.ExperimentReview />, disabled: false, editable: true },
+    { id: 'sla-review', label: 'SLA审稿', icon: <Icons.ContractReview />, disabled: false, editable: true },
+    { id: 'meeting-submission-review', label: '婷简单', icon: <Icons.MeetingReview />, disabled: false, editable: true },
+    { id: 'export', label: '导出', icon: <Icons.Export />, disabled: true, tooltip: '即将推出' },
+    { id: 'summary', label: '摘要', icon: <Icons.Summary />, disabled: true, tooltip: '即将推出' },
   ];
 
   const modelMenu = modelMenuOpen
@@ -188,6 +213,47 @@ export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => 
       )
     : null;
 
+  const editDialog = editingToolId
+    ? ReactDOM.createPortal(
+        <div className={styles.promptOverlay} onClick={() => setEditingToolId(null)}>
+          <div className={styles.promptDialog} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.promptHeader}>
+              <h3>编辑「{TOOL_LABELS[editingToolId]}」Prompt</h3>
+              <button className={styles.promptCloseBtn} onClick={() => setEditingToolId(null)}>
+                <Icons.X />
+              </button>
+            </div>
+            <div className={styles.promptBody}>
+              <p className={styles.promptHint}>
+                点击工具按钮时，将发送以下指令对当前对话中的文档进行审稿。
+              </p>
+              <textarea
+                className={styles.promptTextarea}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                placeholder="输入自定义审稿 Prompt..."
+                autoFocus
+              />
+            </div>
+            <div className={styles.promptFooter}>
+              <button className={styles.promptResetBtn} onClick={handleReset}>
+                恢复默认
+              </button>
+              <div className={styles.promptFooterRight}>
+                <button className={styles.promptCancelBtn} onClick={() => setEditingToolId(null)}>
+                  取消
+                </button>
+                <button className={styles.promptSaveBtn} onClick={handleSave}>
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )
+    : null;
+
   return (
     <div className={`${styles.toolbar} ${expanded ? styles.expanded : ''}`}>
       <div className={styles.toolList}>
@@ -211,18 +277,47 @@ export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => 
 
         {/* Tool buttons */}
         {tools.map((tool) => (
-          <button
-            key={tool.id}
-            className={`${styles.toolBtn} ${tool.disabled ? styles.disabled : ''}`}
-            onClick={tool.disabled ? undefined : tool.onClick}
-            title={expanded ? undefined : (tool.tooltip || tool.label)}
-          >
-            <span className={styles.toolIcon}>{tool.icon}</span>
-            <span className={styles.toolLabel}>{tool.label}</span>
-            {!expanded && (
-              <span className={styles.tooltip}>{tool.tooltip || tool.label}</span>
-            )}
-          </button>
+          tool.editable ? (
+            <div key={tool.id} className={styles.toolBtnWrapper}>
+              <button
+                className={`${styles.toolBtn} ${tool.disabled ? styles.disabled : ''}`}
+                onClick={tool.disabled ? undefined : () => handleToolClick(tool.id as ReviewToolId)}
+                title={expanded ? undefined : (tool.tooltip || tool.label)}
+              >
+                <span className={styles.toolIcon}>{tool.icon}</span>
+                <span className={styles.toolLabel}>{tool.label}</span>
+                {!expanded && (
+                  <span className={styles.tooltip}>{tool.tooltip || tool.label}</span>
+                )}
+                {customPrompts[tool.id as ReviewToolId] && (
+                  <span className={styles.customDot} />
+                )}
+              </button>
+              <button
+                className={styles.editBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openEditDialog(tool.id as ReviewToolId);
+                }}
+                title="自定义审稿 Prompt"
+              >
+                <Icons.Pencil />
+              </button>
+            </div>
+          ) : (
+            <button
+              key={tool.id}
+              className={`${styles.toolBtn} ${tool.disabled ? styles.disabled : ''}`}
+              onClick={tool.disabled ? undefined : undefined}
+              title={expanded ? undefined : (tool.tooltip || tool.label)}
+            >
+              <span className={styles.toolIcon}>{tool.icon}</span>
+              <span className={styles.toolLabel}>{tool.label}</span>
+              {!expanded && (
+                <span className={styles.tooltip}>{tool.tooltip || tool.label}</span>
+              )}
+            </button>
+          )
         ))}
       </div>
 
@@ -234,6 +329,7 @@ export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => 
 
       {/* Model menu rendered via portal to avoid overflow:hidden clipping */}
       {modelMenu}
+      {editDialog}
     </div>
   );
 };
