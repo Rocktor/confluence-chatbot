@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Confluence Chatbot API",
     description="AI-powered chatbot with Confluence integration",
-    version="2.9.3",
+    version="2.9.5",
     lifespan=lifespan
 )
 
@@ -58,7 +58,7 @@ app.include_router(admin.router)
 
 @app.get("/")
 async def root():
-    return {"message": "Confluence Chatbot API", "version": "2.9.3"}
+    return {"message": "Confluence Chatbot API", "version": "2.9.4"}
 
 @app.get("/health")
 async def health_check():

@@ -245,7 +245,7 @@ interface UIState {
 }
 
 // Model Store
-export type ModelId = 'gpt-5.1' | 'gpt-5.2' | 'gemini-3-pro';
+export type ModelId = 'gpt-5.1' | 'gpt-5.2' | 'gpt-5.4' | 'gpt-5.4-pro' | 'gemini-3-pro';
 
 export interface ModelOption {
   id: ModelId;
@@ -256,6 +256,8 @@ export interface ModelOption {
 export const MODEL_OPTIONS: ModelOption[] = [
   { id: 'gpt-5.1', name: 'GPT-5.1', provider: 'Azure' },
   { id: 'gpt-5.2', name: 'GPT-5.2', provider: 'Azure' },
+  { id: 'gpt-5.4', name: 'GPT-5.4', provider: 'Azure' },
+  { id: 'gpt-5.4-pro', name: 'GPT-5.4 Pro', provider: 'Azure' },
   { id: 'gemini-3-pro', name: 'Gemini 3 Pro', provider: 'Google' },
 ];
 
@@ -286,6 +288,14 @@ export const useUIStore = create<UIState>((set) => ({
 // Review Prompt Store
 export type ReviewToolId = 'review' | 'experiment-review' | 'sla-review' | 'meeting-submission-review';
 
+// Frontend tool id → backend tool name mapping
+export const TOOL_NAME_MAP: Record<ReviewToolId, string> = {
+  'review': 'review_meeting_material',
+  'experiment-review': 'review_experiment_retrospective',
+  'sla-review': 'review_sla_contract',
+  'meeting-submission-review': 'review_meeting_submission',
+};
+
 export const DEFAULT_REVIEW_PROMPTS: Record<ReviewToolId, { empty: string; review: string }> = {
   'review': {
     empty: '请帮我审核会议材料。\n\n（请先发送 Confluence 页面链接，或直接粘贴/上传待审阅的文档内容）',
@@ -305,24 +315,89 @@ export const DEFAULT_REVIEW_PROMPTS: Record<ReviewToolId, { empty: string; revie
   },
 };
 
-interface ReviewPromptState {
-  customPrompts: Partial<Record<ReviewToolId, string>>;
-  setCustomPrompt: (toolId: ReviewToolId, prompt: string) => void;
-  resetPrompt: (toolId: ReviewToolId) => void;
+interface ReviewInstructionEntry {
+  instruction: string;
+  isCustom: boolean;
 }
 
-export const useReviewPromptStore = create<ReviewPromptState>()(
-  persist(
-    (set) => ({
-      customPrompts: {},
-      setCustomPrompt: (toolId, prompt) => set((state) => ({
-        customPrompts: { ...state.customPrompts, [toolId]: prompt }
-      })),
-      resetPrompt: (toolId) => set((state) => {
-        const { [toolId]: _, ...rest } = state.customPrompts;
-        return { customPrompts: rest };
-      }),
-    }),
-    { name: 'review-prompt-storage' }
-  )
-);
+interface ReviewPromptState {
+  instructions: Record<string, ReviewInstructionEntry>;
+  loading: boolean;
+  fetchInstructions: () => Promise<void>;
+  saveInstruction: (toolName: string, instruction: string) => Promise<void>;
+  resetInstruction: (toolName: string) => Promise<void>;
+  isCustom: (toolId: ReviewToolId) => boolean;
+  getInstruction: (toolId: ReviewToolId) => string | undefined;
+}
+
+export const useReviewPromptStore = create<ReviewPromptState>((set, get) => ({
+  instructions: {},
+  loading: false,
+
+  fetchInstructions: async () => {
+    set({ loading: true });
+    try {
+      const token = localStorage.getItem('access_token');
+      const res = await fetch('/api/chat/review-instructions', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Convert snake_case keys from API response
+        const instructions: Record<string, ReviewInstructionEntry> = {};
+        for (const [key, val] of Object.entries(data as Record<string, any>)) {
+          instructions[key] = { instruction: val.instruction, isCustom: val.is_custom };
+        }
+        set({ instructions });
+      }
+    } catch (e) {
+      // Silently fail, use defaults
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  saveInstruction: async (toolName: string, instruction: string) => {
+    const token = localStorage.getItem('access_token');
+    const res = await fetch(`/api/chat/review-instructions/${toolName}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction }),
+    });
+    if (res.ok) {
+      set((state) => ({
+        instructions: {
+          ...state.instructions,
+          [toolName]: { instruction, isCustom: true },
+        },
+      }));
+    }
+  },
+
+  resetInstruction: async (toolName: string) => {
+    const token = localStorage.getItem('access_token');
+    const res = await fetch(`/api/chat/review-instructions/${toolName}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      set((state) => ({
+        instructions: {
+          ...state.instructions,
+          [toolName]: { instruction: data.instruction, isCustom: false },
+        },
+      }));
+    }
+  },
+
+  isCustom: (toolId: ReviewToolId) => {
+    const toolName = TOOL_NAME_MAP[toolId];
+    return get().instructions[toolName]?.isCustom ?? false;
+  },
+
+  getInstruction: (toolId: ReviewToolId) => {
+    const toolName = TOOL_NAME_MAP[toolId];
+    return get().instructions[toolName]?.instruction;
+  },
+}));

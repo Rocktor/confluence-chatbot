@@ -28,7 +28,8 @@ class ChatService:
         self.openai_service = AzureOpenAIService()
         self._gemini_service = None  # Lazy init
         self.confluence_service = self._get_user_confluence_service(user_id)
-        self.tool_executor = ToolExecutor(self.confluence_service)
+        custom_instructions = self._get_user_review_instructions(user_id)
+        self.tool_executor = ToolExecutor(self.confluence_service, custom_instructions)
 
     @property
     def gemini_service(self):
@@ -38,6 +39,25 @@ class ChatService:
             from app.services.gemini_service import GeminiService
             self._gemini_service = GeminiService()
         return self._gemini_service
+
+    def _get_azure_deployment(self, model: str):
+        """Get Azure deployment name for a given model."""
+        deployment_map = {
+            "gpt-5.2": settings.AZURE_CHAT_DEPLOYMENT_52,
+            "gpt-5.4": settings.AZURE_CHAT_DEPLOYMENT_54,
+            "gpt-5.4-pro": settings.AZURE_CHAT_DEPLOYMENT_54_PRO,
+        }
+        return deployment_map.get(model)
+
+    def _get_user_review_instructions(self, user_id: int) -> dict:
+        """Get user's custom review instructions from database"""
+        if not user_id:
+            return {}
+        try:
+            user = self.db.query(User).filter(User.id == user_id).first()
+            return (user.review_custom_instructions or {}) if user else {}
+        except Exception:
+            return {}
 
     def _get_user_confluence_service(self, user_id: int) -> Optional[ConfluenceService]:
         """Get Confluence service with user's credentials"""
@@ -317,7 +337,8 @@ class ChatService:
         if self.confluence_service is None and self.user_id:
             self.confluence_service = self._get_user_confluence_service(self.user_id)
             if self.confluence_service:
-                self.tool_executor = ToolExecutor(self.confluence_service)
+                custom_instructions = self._get_user_review_instructions(self.user_id)
+                self.tool_executor = ToolExecutor(self.confluence_service, custom_instructions)
                 logger.info(f"Lazy-loaded Confluence service for user {self.user_id}")
 
         # Merge image_urls and file_urls for storage
@@ -356,7 +377,7 @@ class ChatService:
                     message_history, tools=CONFLUENCE_TOOLS
                 )
             else:
-                deployment = settings.AZURE_CHAT_DEPLOYMENT_52 if model == "gpt-5.2" else None
+                deployment = self._get_azure_deployment(model)
                 stream = self.openai_service.chat_completion_with_tools_stream(
                     message_history, tools=CONFLUENCE_TOOLS, deployment=deployment
                 )
@@ -400,7 +421,7 @@ class ChatService:
                         if model == "gemini-3-pro":
                             forced_response = await self.gemini_service.chat_completion(message_history, max_tokens=1000)
                         else:
-                            deployment = settings.AZURE_CHAT_DEPLOYMENT_52 if model == "gpt-5.2" else None
+                            deployment = self._get_azure_deployment(model)
                             forced_response = await self.openai_service.chat_completion(message_history, max_tokens=1000, deployment=deployment)
                         if forced_response and forced_response.strip():
                             yield {"type": "content", "content": forced_response}

@@ -15,12 +15,20 @@ from app.services.tools import (
 
 logger = logging.getLogger("tool_executor")
 
+DEFAULT_REVIEW_INSTRUCTIONS = {
+    "review_meeting_material": "请严格按照上述审稿标准对文档进行审核，按照输出格式生成完整的审稿报告。注意：只评审材料质量，不评判业务方向。",
+    "review_experiment_retrospective": "请严格按照上述运策实验复盘审稿标准对文档进行审核，按照输出格式生成完整的审稿报告。注意：只评审复盘材料质量，不评判实验本身成败。失败的实验如果复盘写得好，同样可以高分通过。",
+    "review_sla_contract": "请严格按照上述SLA合同审稿标准对合同进行审核，按照输出格式生成完整的审稿报告。请先判断合同类型（人力买断/增量价值分成/计件/里程碑），再进行对应的专项检查。",
+    "review_meeting_submission": "请严格按照 Gate+Score 审核规范逐项检查文档，按照输出格式生成完整的10分制审核报告。审核流程：1）先完成底线层4项检查（三层结构、复盘三要素、计划格式、指标口径），任一不过即判定不通过；2）底线层全部通过后进入上限层4项评级；3）结合CEO判定模式（19条驳回触发器+12条通过信号）进行风险预判；4）给出三态结论（通过/条件通过/不通过）+ 质量等级 + 评分明细 + 具体修改建议。",
+}
+
 
 class ToolExecutor:
     """Execute AI Agent tools"""
 
-    def __init__(self, confluence_service: Optional[ConfluenceService]):
+    def __init__(self, confluence_service: Optional[ConfluenceService], custom_review_instructions: dict = None):
         self.confluence = confluence_service
+        self.custom_review_instructions = custom_review_instructions or {}
         # Create image download service for AI vision
         if confluence_service:
             self.image_service = ConfluenceImageService(
@@ -149,6 +157,10 @@ class ToolExecutor:
                 return await self._move_page(arguments)
             elif tool_name == "upload_attachment_to_confluence":
                 return await self._upload_attachment(arguments)
+            elif tool_name == "list_confluence_attachments":
+                return await self._list_attachments(arguments)
+            elif tool_name == "read_confluence_attachment":
+                return await self._read_attachment(arguments)
             # Table operations
             elif tool_name == "list_confluence_tables":
                 return await self._list_tables(arguments)
@@ -372,6 +384,23 @@ class ToolExecutor:
         content_type = content_type or "application/octet-stream"
 
         result = await self.confluence.upload_attachment(page_id, file_path, filename, content_type)
+        return result
+
+    async def _list_attachments(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """List all attachments on a Confluence page"""
+        page_id = self._extract_page_id(args["page_id_or_url"])
+        attachments = await self.confluence.list_attachments(page_id)
+        return {"success": True, "attachments": attachments, "count": len(attachments)}
+
+    async def _read_attachment(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Read attachment content from Confluence page"""
+        page_id = self._extract_page_id(args["page_id_or_url"])
+        filename = args.get("filename")
+        attachment_index = args.get("attachment_index")
+
+        result = await self.confluence.read_attachment_content(
+            page_id, filename=filename, attachment_index=attachment_index
+        )
         return result
 
     async def _edit_page(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -664,12 +693,16 @@ class ToolExecutor:
         except ValueError as e:
             return {"success": False, "error": str(e)}
 
+        instruction = self.custom_review_instructions.get(
+            "review_meeting_material",
+            DEFAULT_REVIEW_INSTRUCTIONS["review_meeting_material"]
+        )
         return {
             "success": True,
             "review_standard": REVIEW_STANDARD,
             "document_content": document_content,
             "output_format": REVIEW_OUTPUT_FORMAT,
-            "instruction": "请严格按照上述审稿标准对文档进行审核，按照输出格式生成完整的审稿报告。注意：只评审材料质量，不评判业务方向。"
+            "instruction": instruction
         }
 
     async def _review_experiment_retrospective(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -679,12 +712,16 @@ class ToolExecutor:
         except ValueError as e:
             return {"success": False, "error": str(e)}
 
+        instruction = self.custom_review_instructions.get(
+            "review_experiment_retrospective",
+            DEFAULT_REVIEW_INSTRUCTIONS["review_experiment_retrospective"]
+        )
         return {
             "success": True,
             "review_standard": EXPERIMENT_REVIEW_STANDARD,
             "document_content": document_content,
             "output_format": EXPERIMENT_REVIEW_OUTPUT_FORMAT,
-            "instruction": "请严格按照上述运策实验复盘审稿标准对文档进行审核，按照输出格式生成完整的审稿报告。注意：只评审复盘材料质量，不评判实验本身成败。失败的实验如果复盘写得好，同样可以高分通过。"
+            "instruction": instruction
         }
 
     async def _review_sla_contract(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -694,12 +731,16 @@ class ToolExecutor:
         except ValueError as e:
             return {"success": False, "error": str(e)}
 
+        instruction = self.custom_review_instructions.get(
+            "review_sla_contract",
+            DEFAULT_REVIEW_INSTRUCTIONS["review_sla_contract"]
+        )
         return {
             "success": True,
             "review_standard": SLA_REVIEW_STANDARD,
             "document_content": document_content,
             "output_format": SLA_REVIEW_OUTPUT_FORMAT,
-            "instruction": "请严格按照上述SLA合同审稿标准对合同进行审核，按照输出格式生成完整的审稿报告。请先判断合同类型（人力买断/增量价值分成/计件/里程碑），再进行对应的专项检查。"
+            "instruction": instruction
         }
 
     async def _review_meeting_submission(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -709,10 +750,14 @@ class ToolExecutor:
         except ValueError as e:
             return {"success": False, "error": str(e)}
 
+        instruction = self.custom_review_instructions.get(
+            "review_meeting_submission",
+            DEFAULT_REVIEW_INSTRUCTIONS["review_meeting_submission"]
+        )
         return {
             "success": True,
             "review_standard": MEETING_SUBMISSION_REVIEW_STANDARD,
             "document_content": document_content,
             "output_format": MEETING_SUBMISSION_REVIEW_OUTPUT_FORMAT,
-            "instruction": "请严格按照 Gate+Score 审核规范逐项检查文档，按照输出格式生成完整的10分制审核报告。审核流程：1）先完成底线层4项检查（三层结构、复盘三要素、计划格式、指标口径），任一不过即判定不通过；2）底线层全部通过后进入上限层4项评级；3）结合CEO判定模式（19条驳回触发器+12条通过信号）进行风险预判；4）给出三态结论（通过/条件通过/不通过）+ 质量等级 + 评分明细 + 具体修改建议。"
+            "instruction": instruction
         }

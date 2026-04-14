@@ -2,7 +2,7 @@ import httpx
 import re
 import html
 from html import unescape
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 from cryptography.fernet import Fernet
 import base64
 import hashlib
@@ -235,6 +235,80 @@ class ConfluenceService:
                 return {"success": True, "filename": filename}
             else:
                 return {"success": False, "error": f"Upload failed: {response.status_code}"}
+
+    async def list_attachments(self, page_id: str) -> List[Dict[str, Any]]:
+        """List all attachments on a page"""
+        url = f"{self.base_url}/rest/api/content/{page_id}/child/attachment"
+        params = {"os_authType": "basic", "limit": 100}
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url, auth=self.auth, params=params)
+            if response.status_code != 200:
+                return []
+
+            results = []
+            for item in response.json().get('results', []):
+                results.append({
+                    'id': item['id'],
+                    'filename': item['title'],
+                    'size': item.get('extensions', {}).get('fileSize', 0),
+                    'media_type': item.get('extensions', {}).get('mediaType', ''),
+                    'download_url': f"{self.base_url}{item['_links']['download']}"
+                })
+            return results
+
+    async def read_attachment_content(self, page_id: str, filename: str = None,
+                                     attachment_index: int = None) -> Dict[str, Any]:
+        """Read attachment content (text files only)"""
+        attachments = await self.list_attachments(page_id)
+        if not attachments:
+            return {"success": False, "error": "页面没有附件"}
+
+        target = None
+        if filename:
+            target = next((a for a in attachments if a['filename'] == filename), None)
+        elif attachment_index is not None:
+            if 0 <= attachment_index < len(attachments):
+                target = attachments[attachment_index]
+
+        if not target:
+            return {"success": False, "error": "未找到指定附件"}
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            params = {"os_authType": "basic"}
+            response = await client.get(target['download_url'], auth=self.auth, params=params)
+
+            if response.status_code != 200:
+                return {"success": False, "error": f"下载失败: {response.status_code}"}
+
+            # Check if text file
+            media_type = target['media_type']
+            filename_lower = target['filename'].lower()
+            is_text = (
+                any(t in media_type for t in ['text/', 'application/json', 'application/xml']) or
+                any(filename_lower.endswith(ext) for ext in
+                    ['.md', '.txt', '.py', '.js', '.json', '.xml', '.html', '.css',
+                     '.yaml', '.yml', '.sh', '.conf', '.ini', '.log', '.csv'])
+            )
+
+            if not is_text:
+                return {"success": False, "error": "不支持的文件类型（仅支持文本文件）"}
+
+            try:
+                content = response.content.decode('utf-8')
+            except UnicodeDecodeError:
+                try:
+                    content = response.content.decode('gbk')
+                except:
+                    return {"success": False, "error": "无法解码文件内容"}
+
+            return {
+                "success": True,
+                "content": content,
+                "filename": target['filename'],
+                "media_type": media_type,
+                "size": target['size']
+            }
 
     async def fix_image_references(self, page_id: str, filenames: list) -> Dict:
         """Fix image references in page to use attachment format"""

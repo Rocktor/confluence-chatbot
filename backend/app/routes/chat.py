@@ -12,9 +12,16 @@ from app.models.schemas import (
     MessageResponse
 )
 from app.models.orm import User, UserFile, Conversation, Message
+from app.services.tool_executor import DEFAULT_REVIEW_INSTRUCTIONS
 from app.websocket.chat_handler import chat_handler
 from typing import List, Optional
 from pathlib import Path
+from pydantic import BaseModel
+
+VALID_REVIEW_TOOLS = set(DEFAULT_REVIEW_INSTRUCTIONS.keys())
+
+class ReviewInstructionUpdate(BaseModel):
+    instruction: str
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -117,3 +124,55 @@ async def upload_files(
     db.commit()
 
     return {"urls": [r["url"] for r in results], "files": results}
+
+
+@router.get("/review-instructions")
+async def get_review_instructions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all review instructions (default + custom) for current user"""
+    custom = current_user.review_custom_instructions or {}
+    result = {}
+    for tool_name, default_instruction in DEFAULT_REVIEW_INSTRUCTIONS.items():
+        is_custom = tool_name in custom
+        result[tool_name] = {
+            "instruction": custom[tool_name] if is_custom else default_instruction,
+            "is_custom": is_custom,
+        }
+    return result
+
+
+@router.put("/review-instructions/{tool_name}")
+async def update_review_instruction(
+    tool_name: str,
+    body: ReviewInstructionUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save custom review instruction for a tool"""
+    if tool_name not in VALID_REVIEW_TOOLS:
+        raise HTTPException(status_code=400, detail=f"Invalid tool_name: {tool_name}")
+
+    custom = dict(current_user.review_custom_instructions or {})
+    custom[tool_name] = body.instruction.strip()
+    current_user.review_custom_instructions = custom
+    db.commit()
+    return {"success": True, "tool_name": tool_name, "instruction": custom[tool_name], "is_custom": True}
+
+
+@router.delete("/review-instructions/{tool_name}")
+async def reset_review_instruction(
+    tool_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Reset a custom review instruction to default"""
+    if tool_name not in VALID_REVIEW_TOOLS:
+        raise HTTPException(status_code=400, detail=f"Invalid tool_name: {tool_name}")
+
+    custom = dict(current_user.review_custom_instructions or {})
+    custom.pop(tool_name, None)
+    current_user.review_custom_instructions = custom
+    db.commit()
+    return {"success": True, "tool_name": tool_name, "instruction": DEFAULT_REVIEW_INSTRUCTIONS[tool_name], "is_custom": False}

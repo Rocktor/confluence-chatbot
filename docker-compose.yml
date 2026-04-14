@@ -88,27 +88,9 @@ services:
     networks:
       - cf_network
 
-  nginx:
-    image: nginx:alpine
-    container_name: cf_nginx
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - frontend_build:/usr/share/nginx/html:ro
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      - backend
-      - frontend
-    networks:
-      - cf_network
-
 volumes:
   postgres_data:
   redis_data:
-  frontend_build:
 
 networks:
   cf_network:

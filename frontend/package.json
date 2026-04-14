@@ -1,6 +1,6 @@
 {
   "name": "confluence-chatbot-frontend",
-  "version": "2.9.3",
+  "version": "2.9.5",
   "type": "module",
   "scripts": {
     "dev": "vite",

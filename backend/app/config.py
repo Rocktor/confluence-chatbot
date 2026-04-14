@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     AZURE_OPENAI_API_VERSION: str = "2024-12-01-preview"
     AZURE_CHAT_DEPLOYMENT: str = "gpt-5.1"
     AZURE_CHAT_DEPLOYMENT_52: str = "gpt-5.2"
+    AZURE_CHAT_DEPLOYMENT_54: str = "gpt-5.4"
+    AZURE_CHAT_DEPLOYMENT_54_PRO: str = "gpt-5.4-pro"
     AZURE_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-large"
 
     # Vertex AI (Gemini)

@@ -248,7 +248,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
       </div>
 
       {/* Version */}
-      <div className={styles.version}>v2.9.3</div>
+      <div className={styles.version}>v2.9.5</div>
     </aside>
   );
 };

@@ -18,6 +18,7 @@ class User(Base):
     avatar_url = Column(Text)
     role = Column(String(50), default="user")  # user, admin
     is_active = Column(Boolean, default=True)
+    review_custom_instructions = Column(JSONB, default={})
     last_login_at = Column(TIMESTAMP)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

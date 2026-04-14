@@ -186,6 +186,48 @@ CONFLUENCE_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_confluence_attachments",
+            "description": "列出 Confluence 页面的所有附件。当用户想查看页面有哪些附件、或准备读取附件时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id_or_url": {
+                        "type": "string",
+                        "description": "页面 ID 或 URL"
+                    }
+                },
+                "required": ["page_id_or_url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_confluence_attachment",
+            "description": "读取 Confluence 页面附件的内容（仅支持文本文件）。支持按文件名或索引读取。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id_or_url": {
+                        "type": "string",
+                        "description": "页面 ID 或 URL"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "附件文件名（可选，与 attachment_index 二选一）"
+                    },
+                    "attachment_index": {
+                        "type": "integer",
+                        "description": "附件索引，从 0 开始（可选，与 filename 二选一）"
+                    }
+                },
+                "required": ["page_id_or_url"]
+            }
+        }
+    },
     # ============ 表格操作工具 ============
     {
         "type": "function",

@@ -104,7 +104,7 @@ class ChatWebSocketHandler:
 
                 # Parse model selection
                 model = message_data.get("model", "gpt-5.1")
-                ALLOWED_MODELS = {"gpt-5.1", "gpt-5.2", "gemini-3-pro"}
+                ALLOWED_MODELS = {"gpt-5.1", "gpt-5.2", "gpt-5.4", "gpt-5.4-pro", "gemini-3-pro"}
                 if model not in ALLOWED_MODELS:
                     model = "gpt-5.1"
 

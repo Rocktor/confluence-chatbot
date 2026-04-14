@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { useChatStore, useModelStore, MODEL_OPTIONS, useReviewPromptStore, DEFAULT_REVIEW_PROMPTS, ReviewToolId } from '../../store/chatStore';
+import { useChatStore, useModelStore, MODEL_OPTIONS, useReviewPromptStore, DEFAULT_REVIEW_PROMPTS, TOOL_NAME_MAP, ReviewToolId } from '../../store/chatStore';
 import styles from './RightToolbar.module.css';
 
 interface RightToolbarProps {
@@ -97,9 +97,14 @@ export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => 
   const [editValue, setEditValue] = useState('');
   const { messages, isLoading } = useChatStore();
   const { currentModel, setCurrentModel } = useModelStore();
-  const { customPrompts, setCustomPrompt, resetPrompt } = useReviewPromptStore();
+  const { fetchInstructions, saveInstruction, resetInstruction, isCustom, getInstruction } = useReviewPromptStore();
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+
+  // Fetch instructions from backend on mount
+  useEffect(() => {
+    fetchInstructions();
+  }, [fetchInstructions]);
 
   // Close model menu on outside click
   useEffect(() => {
@@ -133,37 +138,40 @@ export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => 
 
     const defaults = DEFAULT_REVIEW_PROMPTS[toolId];
     if (messages.length === 0) {
-      // Empty conversation always uses default prompt
       onSendMessage(defaults.empty);
     } else {
-      // Use custom prompt if set, otherwise default
-      const prompt = customPrompts[toolId] ?? defaults.review;
-      onSendMessage(prompt);
+      // Trigger message is always the frontend default prompt;
+      // the actual review instruction is applied by the backend tool
+      onSendMessage(defaults.review);
     }
-  }, [isLoading, messages.length, customPrompts, onSendMessage]);
+  }, [isLoading, messages.length, onSendMessage]);
 
   const openEditDialog = useCallback((toolId: ReviewToolId) => {
-    const current = customPrompts[toolId] ?? DEFAULT_REVIEW_PROMPTS[toolId].review;
-    setEditValue(current);
+    const instruction = getInstruction(toolId);
+    setEditValue(instruction ?? '');
     setEditingToolId(toolId);
-  }, [customPrompts]);
+  }, [getInstruction]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!editingToolId) return;
     const trimmed = editValue.trim();
-    if (trimmed === DEFAULT_REVIEW_PROMPTS[editingToolId].review) {
-      // Same as default, clear custom
-      resetPrompt(editingToolId);
-    } else if (trimmed) {
-      setCustomPrompt(editingToolId, trimmed);
+    if (trimmed) {
+      const toolName = TOOL_NAME_MAP[editingToolId];
+      await saveInstruction(toolName, trimmed);
     }
     setEditingToolId(null);
-  }, [editingToolId, editValue, setCustomPrompt, resetPrompt]);
+  }, [editingToolId, editValue, saveInstruction]);
 
-  const handleReset = useCallback(() => {
+  const handleReset = useCallback(async () => {
     if (!editingToolId) return;
-    setEditValue(DEFAULT_REVIEW_PROMPTS[editingToolId].review);
-  }, [editingToolId]);
+    const toolName = TOOL_NAME_MAP[editingToolId];
+    await resetInstruction(toolName);
+    // Update the textarea with the restored default
+    const newInstruction = useReviewPromptStore.getState().instructions[toolName]?.instruction;
+    if (newInstruction) {
+      setEditValue(newInstruction);
+    }
+  }, [editingToolId, resetInstruction]);
 
   const currentModelOption = MODEL_OPTIONS.find(m => m.id === currentModel) || MODEL_OPTIONS[0];
 
@@ -218,20 +226,20 @@ export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => 
         <div className={styles.promptOverlay} onClick={() => setEditingToolId(null)}>
           <div className={styles.promptDialog} onClick={(e) => e.stopPropagation()}>
             <div className={styles.promptHeader}>
-              <h3>编辑「{TOOL_LABELS[editingToolId]}」Prompt</h3>
+              <h3>自定义「{TOOL_LABELS[editingToolId]}」审稿指令</h3>
               <button className={styles.promptCloseBtn} onClick={() => setEditingToolId(null)}>
                 <Icons.X />
               </button>
             </div>
             <div className={styles.promptBody}>
               <p className={styles.promptHint}>
-                点击工具按钮时，将发送以下指令对当前对话中的文档进行审稿。
+                此指令指导 AI 如何根据内置审稿标准生成报告。审稿标准和评分规则由系统内置，不受此处影响。
               </p>
               <textarea
                 className={styles.promptTextarea}
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
-                placeholder="输入自定义审稿 Prompt..."
+                placeholder="输入自定义审稿指令..."
                 autoFocus
               />
             </div>
@@ -289,7 +297,7 @@ export const RightToolbar: React.FC<RightToolbarProps> = ({ onSendMessage }) => 
                 {!expanded && (
                   <span className={styles.tooltip}>{tool.tooltip || tool.label}</span>
                 )}
-                {customPrompts[tool.id as ReviewToolId] && (
+                {isCustom(tool.id as ReviewToolId) && (
                   <span className={styles.customDot} />
                 )}
               </button>

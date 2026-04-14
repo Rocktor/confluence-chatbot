@@ -567,6 +567,135 @@ class ConfluenceAPI:
 
     # ============ 附件操作 ============
 
+    def list_attachments(self, page_id: str) -> List[Dict[str, Any]]:
+        """
+        列出页面的所有附件
+
+        Returns:
+            [{id, filename, size, media_type, download_url}]
+        """
+        page_id = self._extract_page_id(page_id)
+        url = f"{self.base_url}/rest/api/content/{page_id}/child/attachment"
+        params = {"os_authType": "basic", "limit": 100}
+
+        response = self.session.get(url, params=params)
+        if response.status_code != 200:
+            return []
+
+        results = []
+        for item in response.json().get('results', []):
+            results.append({
+                'id': item['id'],
+                'filename': item['title'],
+                'size': item.get('extensions', {}).get('fileSize', 0),
+                'media_type': item.get('extensions', {}).get('mediaType', ''),
+                'download_url': f"{self.base_url}{item['_links']['download']}"
+            })
+        return results
+
+    def download_attachment(self, page_id: str, filename: str, save_path: str = None) -> Dict[str, Any]:
+        """
+        下载附件
+
+        Args:
+            page_id: 页面 ID
+            filename: 附件文件名
+            save_path: 保存路径（可选，默认保存到当前目录）
+
+        Returns:
+            {success, file_path, size} 或 {success, error}
+        """
+        page_id = self._extract_page_id(page_id)
+        download_url = f"{self.base_url}/download/attachments/{page_id}/{filename}"
+        params = {"os_authType": "basic"}
+
+        response = self.session.get(download_url, params=params, stream=True)
+        if response.status_code != 200:
+            return {"success": False, "error": f"下载失败: {response.status_code}"}
+
+        if save_path is None:
+            save_path = filename
+
+        with open(save_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        file_size = Path(save_path).stat().st_size
+        return {"success": True, "file_path": save_path, "size": file_size}
+
+    def read_attachment_content(self, page_id: str, filename: str = None,
+                               attachment_index: int = None) -> Dict[str, Any]:
+        """
+        读取附件内容（支持按文件名或索引）
+
+        Args:
+            page_id: 页面 ID
+            filename: 附件文件名（可选）
+            attachment_index: 附件索引，从 0 开始（可选）
+
+        Returns:
+            {success, content, filename, media_type, size, is_text} 或 {success, error}
+        """
+        page_id = self._extract_page_id(page_id)
+
+        # 获取附件列表
+        attachments = self.list_attachments(page_id)
+        if not attachments:
+            return {"success": False, "error": "页面没有附件"}
+
+        # 选择目标附件
+        target = None
+        if filename:
+            target = next((a for a in attachments if a['filename'] == filename), None)
+        elif attachment_index is not None:
+            if 0 <= attachment_index < len(attachments):
+                target = attachments[attachment_index]
+
+        if not target:
+            return {"success": False, "error": "未找到指定附件"}
+
+        # 下载附件
+        params = {"os_authType": "basic"}
+        response = self.session.get(target['download_url'], params=params)
+
+        if response.status_code != 200:
+            return {"success": False, "error": f"下载失败: {response.status_code}"}
+
+        # 判断是否为文本文件
+        media_type = target['media_type']
+        filename_lower = target['filename'].lower()
+
+        is_text = (
+            any(t in media_type for t in ['text/', 'application/json', 'application/xml']) or
+            any(filename_lower.endswith(ext) for ext in
+                ['.md', '.txt', '.py', '.js', '.json', '.xml', '.html', '.css',
+                 '.yaml', '.yml', '.sh', '.conf', '.ini', '.log', '.csv'])
+        )
+
+        content = response.content
+
+        # 如果是文本，尝试解码
+        if is_text:
+            try:
+                content = content.decode('utf-8')
+            except UnicodeDecodeError:
+                try:
+                    content = content.decode('gbk')
+                except:
+                    is_text = False
+
+        if not is_text:
+            return {"success": False, "error": "不支持的文件类型（仅支持文本文件）"}
+
+        return {
+            "success": True,
+            "content": content,
+            "filename": target['filename'],
+            "media_type": media_type,
+            "size": target['size'],
+            "is_text": is_text
+        }
+
     def upload_attachment(self, page_id: str, file_path: str) -> Dict[str, Any]:
         """
         上传附件到 Confluence 页面
